@@ -1,4 +1,4 @@
---v12321
+--v3213213fad
 
 repeat task.wait() until game:IsLoaded()
 
@@ -106,7 +106,7 @@ if _G.config.AutoExecute then
 local AUTOEXEC = [[
 task.wait(5)
 loadstring(game:HttpGet(
-"https://pastebin.com/raw/zkC5E6rT"
+"https://raw.githubusercontent.com/woraphan88712345-coder/dasdasdafaf/refs/heads/main/idkdidkdk.lua"
 ))()
 ]]
 
