@@ -1,3 +1,5 @@
+--v12321
+
 repeat task.wait() until game:IsLoaded()
 
 _G.config = {
@@ -66,15 +68,11 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
         local Frame = BleedoutGui:FindFirstChild("Frame")
 
         if Frame then
-            local Options = Frame:FindFirstChild("Options")
+            local ReviveBtn = Frame:FindFirstChild("Revive")
 
-            if Options then
-                local ReviveBtn = Options:FindFirstChild("Revive")
-
-                if ReviveBtn then
-                    click_btn(ReviveBtn)
-                    task.wait(0.3)
-                end
+            if ReviveBtn then
+                click_btn(ReviveBtn)
+                task.wait(0.3)
             end
         end
     end
