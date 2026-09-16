@@ -86,15 +86,11 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
         local Frame = EndFrame:FindFirstChild("Frame")
 
         if Frame then
-            local Options = Frame:FindFirstChild("Options")
+            local ReplayBtn = Frame:FindFirstChild("Replay")
 
-            if Options then
-                local ReplayBtn = Options:FindFirstChild("Replay")
-
-                if ReplayBtn then
-                    click_btn(ReplayBtn)
-                    task.wait(0.3)
-                end
+            if ReplayBtn then
+                click_btn(ReplayBtn)
+                task.wait(0.3)
             end
         end
     end
