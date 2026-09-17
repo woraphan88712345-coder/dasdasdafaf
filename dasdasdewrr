@@ -1,0 +1,1720 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualUser = game:GetService("VirtualUser")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local LocalPlayer = Players.LocalPlayer
+
+if getgenv then
+    getgenv().gethui = function()
+        return LocalPlayer:WaitForChild("PlayerGui")
+    end
+end
+
+local GAME_NAME = "Greedy Growers"
+local DISCORD_INVITE = "https://discord.gg/jWNDPNMmyB"
+
+-- ==============================================================================
+-- KNIT & GAME CONFIG
+-- ==============================================================================
+local Knit = require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Knit"))
+local SeedConfig = require(ReplicatedStorage.Shared.Info.SeedConfig)
+local ExpandedRarities = require(ReplicatedStorage.Shared.Info.ExpandedRarities)
+local RebirthConfig = require(ReplicatedStorage.Shared.Info.RebirthConfig)
+local FertilizerConfig = require(ReplicatedStorage.Shared.Info.FertilizerConfig)
+local CustomEnum = require(ReplicatedStorage.Shared.Info.CustomEnum)
+local Constants = require(ReplicatedStorage.Shared.Info.Constants)
+local WeatherConfig = require(ReplicatedStorage.Shared.Info.WeatherConfig)
+
+local SeedConveyorService = Knit.GetService("SeedConveyorService")
+local PlayerPlotService = Knit.GetService("PlayerPlotService")
+local PlantRoundService = Knit.GetService("PlantRoundService")
+local ToolService = Knit.GetService("ToolService")
+local SellStandService = Knit.GetService("SellStandService")
+local SellFruitsService = Knit.GetService("SellFruitsService")
+local RebirthService = Knit.GetService("RebirthService")
+local DataClient = Knit.GetController("DataClient")
+
+-- ==============================================================================
+-- OBSIDIAN UI LIBRARY
+-- ==============================================================================
+local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+
+pcall(function()
+    Library.ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end)
+
+local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
+local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+
+local Toggles = Library.Toggles
+local Options = Library.Options
+
+-- Global action lock (prevents teleport/features colliding with each other)
+local IsActionBusy = false
+
+local function copyDiscord()
+    if setclipboard then
+        setclipboard(DISCORD_INVITE)
+    elseif toclipboard then
+        toclipboard(DISCORD_INVITE)
+    end
+    Library:Notify("Discord invite link copied to clipboard")
+end
+
+-- ==============================================================================
+-- RARITY / SEED / FERTILIZER / WEATHER LISTS
+-- ==============================================================================
+local RARITY_ORDER = {
+    "COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY",
+    "MYTHIC", "CELESTIAL", "SECRET", "DIVINE",
+}
+
+local RARITY_INDEX = {}
+local RARITY_NAMES = {}
+local RARITY_NAME_TO_KEY = {}
+for i, key in ipairs(RARITY_ORDER) do
+    RARITY_INDEX[key] = i
+    local name = ExpandedRarities[key] and ExpandedRarities[key].name or key
+    RARITY_NAMES[i] = name
+    RARITY_NAME_TO_KEY[name] = key
+end
+
+local SEED_NAMES = {}
+local SEED_NAME_TO_KEY = {}
+for key in pairs(SeedConfig.Seeds) do
+    local name = SeedConfig.SeedDisplayName(key)
+    SEED_NAMES[#SEED_NAMES + 1] = name
+    SEED_NAME_TO_KEY[name] = key
+end
+table.sort(SEED_NAMES)
+
+local FERTILIZER_NAMES = { "None" }
+for _, key in ipairs(FertilizerConfig.Order) do
+    FERTILIZER_NAMES[#FERTILIZER_NAMES + 1] = key
+end
+
+local WEATHER_NAMES = {}
+local WEATHER_NAME_TO_KEY = {}
+for _, key in ipairs(WeatherConfig.Order) do
+    local weather = WeatherConfig.Weathers[key]
+    local name = weather and weather.displayName or key
+    WEATHER_NAMES[#WEATHER_NAMES + 1] = name
+    WEATHER_NAME_TO_KEY[name] = key
+end
+
+-- ==============================================================================
+-- STATIC LISTS (from script 1)
+-- ==============================================================================
+local PlantList = {
+    "Apple Tree", "Astral Tree", "Avocado Tree", "Banana Tree", "Blooming Tree",
+    "Cherry Tree", "Coconut Tree", "Diamond Tree", "DragonFruit Tree", "Elder Tree",
+    "Fig Tree", "Glowing Tree", "Glowshroom Tree", "Inferno Tree", "Lemon Tree",
+    "Magic Tree", "Mango Tree", "Money Tree", "Mushroom Tree", "Oak Tree",
+    "Orange Tree", "Peach Tree", "Pine Tree", "Pizza Tree", "Prismatic Tree",
+    "Spirit Tree", "Starfruit Tree", "Void Tree",
+}
+
+local PickupFruitList = {
+    "Acorn", "Apple", "AstralFruit", "Avocado", "Banana", "Blooming", "Cherry",
+    "Coconut", "Diamond", "DragonFruit", "ElderFruit", "Fig", "GlowingFruit",
+    "Glowshroom", "InfernoFruit", "Lemon", "MagicFruit", "Mango", "MoneyFruit",
+    "Mushroom", "Orange", "Peach", "Pinecone", "Pizza", "PrismaticFruit",
+    "SpiritFruit", "Starfruit", "Void",
+}
+
+local MutationList = {
+    "Charged", "Cosmic", "Dewy", "Dusty", "Frosted", "Golden", "Infested",
+    "Ivory", "Radioactive", "Scaled", "Shocked", "Slimy",
+}
+
+-- Sellable list: dynamic seeds + fruit models (for Sell Filter By Name)
+local SellableList = {}
+do
+    local seen = {}
+    local okSeeds, seedsFolder = pcall(function()
+        return ReplicatedStorage.Assets.Greedy.Seeds
+    end)
+    if okSeeds and seedsFolder then
+        for _, seed in pairs(seedsFolder:GetChildren()) do
+            if not seen[seed.Name] then
+                seen[seed.Name] = true
+                SellableList[#SellableList + 1] = seed.Name
+            end
+        end
+    end
+    local okFruits, fruitsFolder = pcall(function()
+        return ReplicatedStorage.Assets.Greedy.FruitModels
+    end)
+    if okFruits and fruitsFolder then
+        for _, fruit in pairs(fruitsFolder:GetChildren()) do
+            if not seen[fruit.Name] then
+                seen[fruit.Name] = true
+                SellableList[#SellableList + 1] = fruit.Name
+            end
+        end
+    end
+    table.sort(SellableList)
+end
+
+-- ==============================================================================
+-- SHARED STATE
+-- ==============================================================================
+local wantedSeeds = {}
+local wantedPlantSeeds = {}
+local wantedWeathers = {}
+for _, key in ipairs(WeatherConfig.Order) do
+    wantedWeathers[key] = true
+end
+local wantedSellNames = {}
+
+local purchasedSpawns = {}
+local activeRound = nil
+local harvestedRoundId = nil
+
+-- ==============================================================================
+-- SHARED HELPERS
+-- ==============================================================================
+local function getData()
+    return DataClient.currentData
+end
+
+local function getCoins()
+    local data = getData()
+    if not data or not data.Currency then
+        return 0
+    end
+    return data.Currency[CustomEnum.CURRENCIES.COINS] or 0
+end
+
+local function hasInventorySpace()
+    local data = getData()
+    if not data or not data.Inventory then
+        return true
+    end
+    for _, slot in data.Inventory.Hotbar or {} do
+        if slot and slot.empty == true then
+            return true
+        end
+    end
+    return #(data.Inventory.Storage or {}) < Constants.STORAGE_MAX_SIZE
+end
+
+local function getMyPlot()
+    local field = workspace:FindFirstChild("BigField")
+    local plots = field and field:FindFirstChild("PlayerPlots")
+    if not plots then
+        return nil
+    end
+    for _, plot in plots:GetChildren() do
+        if plot:GetAttribute("OwnerUserId") == LocalPlayer.UserId then
+            return plot
+        end
+    end
+    return nil
+end
+
+local function getRoot()
+    local character = LocalPlayer.Character
+    return character and character:FindFirstChild("HumanoidRootPart")
+end
+
+local function getCharacter()
+    return LocalPlayer.Character
+end
+
+local function getActiveWeatherKey()
+    local value = ReplicatedStorage:FindFirstChild("CurrentWeather")
+    return value and WeatherConfig.Normalize(value.Value)
+end
+
+local function getHotbarSlotsFrame()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    return playerGui
+        and playerGui:FindFirstChild("HUD")
+        and playerGui.HUD:FindFirstChild("Hotbar")
+        and playerGui.HUD.Hotbar:FindFirstChild("LowerSection")
+        and playerGui.HUD.Hotbar.LowerSection:FindFirstChild("LowerHotbarSlots")
+end
+
+-- Scan the on-screen hotbar for a slot whose label matches one of `names`
+-- (case-insensitive, spaces stripped). Returns slotNumber, matchedName.
+local function scanHotbarSlot(names)
+    local slotsFrame = getHotbarSlotsFrame()
+    if not slotsFrame then
+        return nil, nil
+    end
+    for _, slotFrame in ipairs(slotsFrame:GetChildren()) do
+        if slotFrame:IsA("GuiObject") then
+            local isTarget = false
+            local matchedName = nil
+            for _, desc in ipairs(slotFrame:GetDescendants()) do
+                if desc:IsA("TextLabel") then
+                    local txtLower = string.lower(string.gsub(desc.Text, " ", ""))
+                    for _, n in ipairs(names) do
+                        local targetName = string.lower(string.gsub(n, " ", ""))
+                        targetName = string.gsub(targetName, "avacado", "avocado")
+                        if targetName ~= "" and string.find(txtLower, targetName, 1, true) then
+                            isTarget = true
+                            matchedName = n
+                            break
+                        end
+                    end
+                end
+                if isTarget then
+                    break
+                end
+            end
+
+            if isTarget then
+                local slotNumber = nil
+                for _, desc in ipairs(slotFrame:GetDescendants()) do
+                    if desc:IsA("TextLabel") then
+                        local textVal = string.gsub(desc.Text, " ", "")
+                        local num = tonumber(textVal)
+                        if num and tostring(num) == textVal then
+                            slotNumber = num
+                            break
+                        end
+                    end
+                end
+                if not slotNumber then
+                    slotNumber = tonumber(string.match(slotFrame.Name, "%d+"))
+                end
+                return slotNumber, matchedName
+            end
+        end
+    end
+    return nil, nil
+end
+
+local function equipSlotAndWait(slotNumber, timeout)
+    local character = getCharacter()
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        pcall(function()
+            humanoid:UnequipTools()
+        end)
+    end
+    task.wait(0.2)
+    ToolService.ToggleEquip:Fire(true, slotNumber)
+    pcall(function()
+        local keyCode = Enum.KeyCode["Number" .. tostring(slotNumber)]
+        if keyCode then
+            VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+            task.wait(0.1)
+            VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+        end
+    end)
+    local deadline = tick() + (timeout or 3)
+    repeat
+        task.wait(0.1)
+        character = getCharacter()
+    until (character and character:FindFirstChildWhichIsA("Tool")) or tick() > deadline
+    return character and character:FindFirstChildWhichIsA("Tool") or nil
+end
+
+-- ==============================================================================
+-- FEATURE: AUTO BUY SEEDS
+-- ==============================================================================
+local function shouldBuySeed(seedType, rarity, mutation)
+    if Toggles.BuyMutatedOnly.Value and (mutation == nil or mutation == "") then
+        return false
+    end
+
+    local seed = SeedConfig.GetSeed(seedType)
+    local cost = seed and seed.plantCost or 0
+    local maxCost = tonumber(Options.BuyMaxCost.Value) or 0
+    if maxCost > 0 and cost > maxCost then
+        return false
+    end
+    local reserve = tonumber(Options.BuyReserve.Value) or 0
+    if getCoins() - cost < reserve then
+        return false
+    end
+
+    local mode = Options.BuyMode.Value
+    if mode == "Buy All" then
+        return true
+    elseif mode == "Selected Seeds" then
+        return wantedSeeds[seedType] == true
+    end
+
+    local minKey = RARITY_NAME_TO_KEY[Options.BuyMinRarity.Value]
+    local have = RARITY_INDEX[rarity]
+    local want = RARITY_INDEX[minKey]
+    if not have or not want then
+        return false
+    end
+    return have >= want
+end
+
+local function doBuySeeds()
+    if not hasInventorySpace() then
+        return
+    end
+
+    local field = workspace:FindFirstChild("BigField")
+    local folder = field and field:FindFirstChild("ConveyorSeeds")
+    if not folder then
+        return
+    end
+
+    for _, holder in folder:GetChildren() do
+        if Library.Unloaded then
+            return
+        end
+        local spawnId = holder:GetAttribute("SpawnId")
+        if spawnId and not purchasedSpawns[spawnId] then
+            local seedType = holder:GetAttribute("SeedType")
+            local rarity = holder:GetAttribute("Rarity")
+            if seedType and rarity and shouldBuySeed(seedType, rarity, holder:GetAttribute("Mutation")) then
+                purchasedSpawns[spawnId] = true
+                local ok, success = SeedConveyorService:RequestPurchase(spawnId):await()
+                if ok and success then
+                    if Toggles.BuyNotify.Value then
+                        Library:Notify(("Purchased %s"):format(SeedConfig.SeedDisplayName(seedType)))
+                    end
+                    if not hasInventorySpace() then
+                        return
+                    end
+                end
+                task.wait(Options.BuyActionDelay.Value or 0.2)
+            end
+        end
+    end
+
+    -- Prune stale spawn ids
+    for spawnId in pairs(purchasedSpawns) do
+        local stillThere = false
+        for _, holder in folder:GetChildren() do
+            if holder:GetAttribute("SpawnId") == spawnId then
+                stillThere = true
+                break
+            end
+        end
+        if not stillThere then
+            purchasedSpawns[spawnId] = nil
+        end
+    end
+end
+
+-- ==============================================================================
+-- FEATURE: ROUND TRACKING (HARVEST / PLANT / DEAD COLLECT)
+-- ==============================================================================
+local function roundMultiplier(startTime)
+    local elapsed = math.max(0, workspace:GetServerTimeNow() - startTime)
+    return math.max(0, math.floor((math.exp(elapsed * 0.28) - 1) * 100) / 100)
+end
+
+local function refreshRound()
+    local ok, rounds = PlantRoundService:GetActiveRounds():await()
+    if not ok or type(rounds) ~= "table" then
+        return
+    end
+    for _, round in rounds do
+        if round.userId == LocalPlayer.UserId then
+            activeRound = round
+            return
+        end
+    end
+    activeRound = nil
+end
+
+local function doRoundHarvest()
+    local round = activeRound
+    if not round then
+        return
+    end
+
+    if round.crashed then
+        if Toggles.AutoCollectDead.Value and harvestedRoundId ~= round.roundId then
+            harvestedRoundId = round.roundId
+            PlantRoundService:CollectDeadTree():await()
+        end
+        return
+    end
+
+    if round.stopped or harvestedRoundId == round.roundId or not Toggles.AutoHarvest.Value then
+        return
+    end
+
+    local target = tonumber(Options.HarvestMultiplier.Value) or 2
+    if roundMultiplier(round.startTime) < target then
+        return
+    end
+
+    harvestedRoundId = round.roundId
+    PlantRoundService:StopPlant():await()
+    if Toggles.HarvestNotify.Value then
+        Library:Notify(("Harvested at %.2fx"):format(roundMultiplier(round.startTime)))
+    end
+end
+
+-- ==============================================================================
+-- FEATURE: AUTO PLANT (ROUND)
+-- ==============================================================================
+local function getEquippedSeedTool()
+    local character = getCharacter()
+    if not character then
+        return nil
+    end
+    for _, tool in character:GetChildren() do
+        if tool:IsA("Tool") and tool:GetAttribute("IsSeed") then
+            return tool
+        end
+    end
+    return nil
+end
+
+local function findPlantableSlot()
+    local data = getData()
+    if not data or not data.Inventory then
+        return nil
+    end
+
+    local mode = Options.PlantMode.Value
+    local bestValue, bestSlot, bestHotbar = nil, nil, nil
+    local containers = {
+        { data.Inventory.Hotbar, true },
+        { data.Inventory.Storage, false },
+    }
+    for _, container in ipairs(containers) do
+        local items, isHotbar = container[1], container[2]
+        for slot, item in items or {} do
+            if item and item.itemType == "Seed" and item.seedType then
+                local allowed = mode == "Any Seed" or wantedPlantSeeds[item.seedType] == true
+                if allowed then
+                    local seed = SeedConfig.GetSeed(item.seedType)
+                    local cost = seed and seed.plantCost or 0
+                    if mode == "Highest Value" then
+                        if not bestValue or cost > bestValue then
+                            bestValue, bestSlot, bestHotbar = cost, slot, isHotbar
+                        end
+                    elseif mode == "Lowest Value" then
+                        if not bestValue or cost < bestValue then
+                            bestValue, bestSlot, bestHotbar = cost, slot, isHotbar
+                        end
+                    else
+                        return slot, isHotbar
+                    end
+                end
+            end
+        end
+    end
+    return bestSlot, bestHotbar
+end
+
+local function doPlant()
+    if activeRound and not activeRound.stopped and not activeRound.crashed then
+        return
+    end
+
+    if Toggles.PlantDuringWeatherOnly.Value then
+        local weather = getActiveWeatherKey()
+        if not weather or not wantedWeathers[weather] then
+            return
+        end
+    end
+
+    local tool = getEquippedSeedTool()
+    if not tool then
+        local slot, isHotbar = findPlantableSlot()
+        if not slot then
+            return
+        end
+        ToolService.ToggleEquip:Fire(isHotbar, slot)
+        local deadline = tick() + 3
+        repeat
+            task.wait(0.1)
+            tool = getEquippedSeedTool()
+        until tool or tick() > deadline
+    end
+
+    if not tool then
+        return
+    end
+
+    local seedType = tool:GetAttribute("SeedType")
+    if not seedType then
+        return
+    end
+
+    local fertilizer = Options.PlantFertilizer.Value or "None"
+    local data = getData()
+    if (data and data.Rebirth or 0) < 1 then
+        fertilizer = "None"
+    end
+
+    local ok, started = PlantRoundService:StartRound(seedType, fertilizer):await()
+    if ok and started then
+        harvestedRoundId = nil
+        pcall(refreshRound)
+        if Toggles.PlantNotify.Value then
+            Library:Notify(("Planted %s"):format(SeedConfig.SeedDisplayName(seedType)))
+        end
+    end
+end
+
+-- ==============================================================================
+-- FEATURE: AUTO COLLECT FRUIT (SERVICE / TELEPORT PROMPTS)
+-- ==============================================================================
+local function collectTreePrompts(tree)
+    local prompts = {}
+    for _, descendant in tree:GetDescendants() do
+        if descendant:IsA("ProximityPrompt") and descendant.Enabled and descendant.ActionText == "Collect" then
+            prompts[#prompts + 1] = descendant
+        end
+    end
+    return prompts
+end
+
+local function doHarvest()
+    local plot = getMyPlot()
+    if not plot then
+        return
+    end
+
+    if Toggles.HarvestCollectAll.Value then
+        pcall(function()
+            PlayerPlotService:CollectAllFruits():await()
+        end)
+    end
+
+    local root = getRoot()
+    local returnCFrame = root and root.CFrame
+
+    for _, tree in plot:GetChildren() do
+        if Library.Unloaded or not Toggles.AutoCollectFruit.Value then
+            break
+        end
+        if string.match(tree.Name, "^PlotTree_") then
+            local prompts = collectTreePrompts(tree)
+            if #prompts > 0 then
+                if Toggles.HarvestTeleport.Value and root then
+                    local base = tree:FindFirstChild("Base")
+                    if base then
+                        root.CFrame = base.CFrame + Vector3.new(0, 5, 0)
+                        task.wait(0.1)
+                    end
+                end
+                for _, prompt in prompts do
+                    if Library.Unloaded or not Toggles.AutoCollectFruit.Value then
+                        break
+                    end
+                    pcall(fireproximityprompt, prompt)
+                    task.wait(Options.HarvestActionDelay.Value or 0.1)
+                end
+            end
+        end
+    end
+
+    if Toggles.HarvestTeleport.Value and root and returnCFrame then
+        root.CFrame = returnCFrame
+    end
+end
+
+-- ==============================================================================
+-- FEATURE: AUTO PICKUP FRUIT (BILLBOARD FILTERS)  [from script 1]
+-- ==============================================================================
+local function selectedNamesFromOption(optionValue)
+    local names = {}
+    for name, state in optionValue do
+        if state then
+            names[#names + 1] = name
+        end
+    end
+    return names
+end
+
+local function getMyPlotBySign()
+    local playerPlots = workspace:FindFirstChild("BigField")
+        and workspace.BigField:FindFirstChild("PlayerPlots")
+    local root = getRoot()
+    if not playerPlots then
+        return nil
+    end
+
+    -- Method 1: owner sign text
+    for _, plot in pairs(playerPlots:GetChildren()) do
+        local signName = plot:FindFirstChild("OwnerSign")
+            and plot.OwnerSign:FindFirstChild("Sign")
+            and plot.OwnerSign.Sign:FindFirstChild("SurfaceGui")
+            and plot.OwnerSign.Sign.SurfaceGui:FindFirstChild("Frame")
+            and plot.OwnerSign.Sign.SurfaceGui.Frame:FindFirstChild("PlayerName")
+        if signName and signName:IsA("TextLabel") then
+            if signName.Text == LocalPlayer.Name or signName.Text == LocalPlayer.DisplayName then
+                return plot
+            end
+        end
+    end
+
+    -- Method 2: nearest plot with dirt
+    if root then
+        local closest, closestDist = nil, math.huge
+        for _, plot in pairs(playerPlots:GetChildren()) do
+            local plot1 = plot:FindFirstChild("Plot1")
+            if plot1 and plot1:FindFirstChild("Dirt") then
+                local dist = (plot1.Dirt.Position - root.Position).Magnitude
+                if dist < closestDist then
+                    closest, closestDist = plot, dist
+                end
+            end
+        end
+        if closest and closestDist < 150 then
+            return closest
+        end
+    end
+    return nil
+end
+
+local function doPickupFruit()
+    local character = getCharacter()
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not root or not playerGui then
+        return
+    end
+
+    local selectedFruits = selectedNamesFromOption(Options.PickupFruits.Value or {})
+    local selectedMutations = selectedNamesFromOption(Options.PickupMutations.Value or {})
+    local maxMultiplier = tonumber(Options.PickupMaxMultiplier.Value) or 0
+
+    local myPlot = getMyPlot() or getMyPlotBySign()
+    if not myPlot then
+        return
+    end
+
+    local plotBillboards = playerGui:FindFirstChild("PlotBillboards")
+    if not plotBillboards then
+        return
+    end
+
+    for _, billboard in pairs(plotBillboards:GetChildren()) do
+        if Library.Unloaded or not Toggles.AutoPickupFruit.Value then
+            break
+        end
+        if billboard:IsA("BillboardGui") and billboard.Adornee then
+            local fruitPart = billboard.Adornee
+            local okDesc, isOnPlot = pcall(function()
+                return fruitPart:IsDescendantOf(myPlot)
+            end)
+            if okDesc and isOnPlot and fruitPart:IsA("BasePart") then
+                local mainFrame = billboard:FindFirstChild("MainFrame")
+                local textLabel = mainFrame and mainFrame:FindFirstChild("Name")
+                local prompt = fruitPart:FindFirstChildWhichIsA("ProximityPrompt")
+
+                if textLabel and textLabel:IsA("TextLabel") and prompt
+                    and string.find(string.lower(prompt.ActionText), "collect") then
+
+                    local allText = textLabel.Text
+
+                    local isValidFruit = #selectedFruits == 0
+                    if not isValidFruit then
+                        for _, selectedFruit in ipairs(selectedFruits) do
+                            local cleanName = string.gsub(selectedFruit, "Fruit", "")
+                            if string.find(string.lower(allText), string.lower(cleanName), 1, true) then
+                                isValidFruit = true
+                                break
+                            end
+                        end
+                    end
+
+                    local isValidMutation = #selectedMutations == 0
+                    if not isValidMutation then
+                        for _, selectedMut in ipairs(selectedMutations) do
+                            if string.find(string.lower(allText), string.lower(selectedMut), 1, true) then
+                                isValidMutation = true
+                                break
+                            end
+                        end
+                    end
+
+                    local isValidMulti = true
+                    if maxMultiplier > 0 then
+                        local extractedMulti = string.match(allText, "([%d%.]+)x")
+                        if extractedMulti and tonumber(extractedMulti) > maxMultiplier then
+                            isValidMulti = false
+                        end
+                    end
+
+                    if isValidFruit and isValidMutation and isValidMulti then
+                        repeat
+                            task.wait(0.1)
+                        until not IsActionBusy or Library.Unloaded
+                        IsActionBusy = true
+
+                        root.CFrame = fruitPart.CFrame + Vector3.new(0, 3, 0)
+                        task.wait(0.2)
+                        pcall(fireproximityprompt, prompt)
+                        task.wait(0.3)
+
+                        IsActionBusy = false
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ==============================================================================
+-- FEATURE: AUTO PLANT PLOT (GRID PLACEMENT)  [from script 1]
+-- ==============================================================================
+local function findEmptyPlotPosition(myPlotFolder, myDirt)
+    local size = myDirt.Size
+    local baseCF = myDirt.CFrame
+
+    for x = -size.X / 2 + 8, size.X / 2 - 8, 12 do
+        for z = -size.Z / 2 + 8, size.Z / 2 - 8, 12 do
+            local testPos = (baseCF * CFrame.new(x, size.Y / 2, z)).Position
+            local occupied = false
+
+            for _, obj in pairs(myPlotFolder:GetChildren()) do
+                if string.find(obj.Name, "PlotTree") and obj:GetPivot() then
+                    local treePos = obj:GetPivot().Position
+                    local dist = (Vector3.new(treePos.X, 0, treePos.Z) - Vector3.new(testPos.X, 0, testPos.Z)).Magnitude
+                    if dist < 8 then
+                        occupied = true
+                        break
+                    end
+                end
+            end
+
+            if not occupied then
+                return testPos
+            end
+        end
+    end
+    return nil
+end
+
+local function doPlantPlot()
+    local selectedPlants = selectedNamesFromOption(Options.PlotPlants.Value or {})
+    if #selectedPlants == 0 then
+        return
+    end
+
+    local character = getCharacter()
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        return
+    end
+
+    -- Locate my plot + dirt
+    local playerPlots = workspace:FindFirstChild("BigField")
+        and workspace.BigField:FindFirstChild("PlayerPlots")
+    if not playerPlots then
+        return
+    end
+
+    local myPlotFolder, myDirt = nil, nil
+    for _, plotDir in pairs(playerPlots:GetChildren()) do
+        local plot1 = plotDir:FindFirstChild("Plot1")
+        if plot1 and plot1:FindFirstChild("Dirt") then
+            local dirt = plot1.Dirt
+            if dirt:GetAttribute("OwnerUserId") == LocalPlayer.UserId
+                or (getRoot() and (dirt.Position - getRoot().Position).Magnitude < 200) then
+                myPlotFolder = plotDir
+                myDirt = dirt
+                break
+            end
+        end
+    end
+    if not myPlotFolder or not myDirt then
+        return
+    end
+
+    -- Check plot is not already full
+    local emptyPos = findEmptyPlotPosition(myPlotFolder, myDirt)
+    if not emptyPos then
+        return
+    end
+
+    -- Find matching hotbar slot by scanning the on-screen hotbar
+    local targetSlot = scanHotbarSlot(selectedPlants)
+    if not targetSlot then
+        return
+    end
+
+    repeat
+        task.wait(0.1)
+    until not IsActionBusy or Library.Unloaded
+    IsActionBusy = true
+
+    local tool = equipSlotAndWait(targetSlot, 3)
+    local targetUUID = tool and tool:GetAttribute("ItemId")
+
+    if targetUUID then
+        -- Re-check an empty position after equipping
+        emptyPos = findEmptyPlotPosition(myPlotFolder, myDirt)
+        local root = getRoot()
+        if emptyPos and root then
+            root.CFrame = CFrame.new(emptyPos) + Vector3.new(0, 4, 0)
+            task.wait(0.5)
+
+            local ok = pcall(function()
+                PlayerPlotService:PlantTree(targetUUID, emptyPos, 0):await()
+            end)
+            if not ok then
+                -- Fallback: direct RF invoke
+                pcall(function()
+                    local rf = ReplicatedStorage
+                        :WaitForChild("Packages"):WaitForChild("_Index")
+                        :WaitForChild("sleitnick_knit@1.6.0"):WaitForChild("knit")
+                        :WaitForChild("Services"):WaitForChild("PlayerPlotService")
+                        :WaitForChild("RF"):WaitForChild("PlantTree")
+                    rf:InvokeServer(targetUUID, emptyPos, 0)
+                end)
+            end
+            task.wait(1.5)
+        end
+    end
+
+    IsActionBusy = false
+end
+
+-- ==============================================================================
+-- FEATURE: AUTO SELL
+-- ==============================================================================
+local function countFruitTools()
+    local count = 0
+    local character = getCharacter()
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    for _, container in { character, backpack } do
+        if container then
+            for _, tool in container:GetChildren() do
+                if tool:IsA("Tool") and tool:GetAttribute("IsFruit") then
+                    count += 1
+                end
+            end
+        end
+    end
+    return count
+end
+
+local function doSellFruits()
+    local character = getCharacter()
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not humanoid or not backpack then
+        return
+    end
+
+    if countFruitTools() < (tonumber(Options.SellMinFruits.Value) or 1) then
+        return
+    end
+
+    if Toggles.SellTeleport.Value then
+        local field = workspace:FindFirstChild("BigField")
+        local stand = field and field:FindFirstChild("SellStand")
+        local root = getRoot()
+        local pivot = stand and stand:GetPivot()
+        if root and pivot then
+            root.CFrame = pivot + Vector3.new(0, 5, 0)
+            task.wait(0.2)
+        end
+    end
+
+    while not Library.Unloaded and Toggles.AutoSellFruits.Value do
+        local fruit
+        for _, tool in character:GetChildren() do
+            if tool:IsA("Tool") and tool:GetAttribute("IsFruit") then
+                fruit = tool
+                break
+            end
+        end
+        if not fruit then
+            for _, tool in backpack:GetChildren() do
+                if tool:IsA("Tool") and tool:GetAttribute("IsFruit") then
+                    humanoid:EquipTool(tool)
+                    fruit = tool
+                    break
+                end
+            end
+        end
+        if not fruit then
+            break
+        end
+        SellFruitsService:SellFruit():await()
+        task.wait(Options.SellActionDelay.Value or 0.2)
+    end
+end
+
+local function doSellAll()
+    SellStandService:SellAll():await()
+end
+
+-- Sell Filter By Name  [from script 1]
+local function doSellByName()
+    local selectedItems = {}
+    for name in pairs(wantedSellNames) do
+        selectedItems[#selectedItems + 1] = name
+    end
+    if #selectedItems == 0 then
+        return
+    end
+
+    local character = getCharacter()
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not character or not backpack then
+        return
+    end
+
+    local tools = backpack:GetChildren()
+    for _, tool in pairs(character:GetChildren()) do
+        if tool:IsA("Tool") then
+            table.insert(tools, tool)
+        end
+    end
+
+    for _, tool in ipairs(tools) do
+        if Library.Unloaded then
+            break
+        end
+        if tool:IsA("Tool") then
+            local itemName = tool.Name
+            local isSelected = false
+            for _, selectedItem in ipairs(selectedItems) do
+                local cleanTarget = string.lower(string.gsub(selectedItem, "Fruit", ""))
+                if cleanTarget ~= "" and string.find(string.lower(itemName), cleanTarget, 1, true) then
+                    isSelected = true
+                    break
+                end
+            end
+
+            if isSelected then
+                local uuid = tool:GetAttribute("ItemId") or tool.Name
+                local ok = pcall(function()
+                    SellStandService:SellTree(uuid):await()
+                end)
+                if not ok then
+                    pcall(function()
+                        local rf = ReplicatedStorage
+                            :WaitForChild("Packages"):WaitForChild("_Index")
+                            :WaitForChild("sleitnick_knit@1.6.0"):WaitForChild("knit")
+                            :WaitForChild("Services"):WaitForChild("SellStandService")
+                            :WaitForChild("RF"):WaitForChild("SellTree")
+                        rf:InvokeServer(uuid)
+                    end)
+                end
+                task.wait(Options.SellActionDelay.Value or 0.2)
+            end
+        end
+    end
+end
+
+-- ==============================================================================
+-- FEATURE: AUTO REBIRTH
+-- ==============================================================================
+local function doRebirth()
+    local data = getData()
+    if not data then
+        return
+    end
+
+    local current = data.Rebirth or 0
+    if current >= (tonumber(Options.RebirthMaxLevel.Value) or RebirthConfig.MaxLevel) then
+        return
+    end
+
+    local nextRebirth = RebirthConfig.GetNext(current)
+    if not nextRebirth or getCoins() < nextRebirth.cost then
+        return
+    end
+
+    RebirthService:DoRebirth():await()
+    if Toggles.RebirthNotify.Value then
+        Library:Notify(("Rebirthed to level %d"):format(current + 1))
+    end
+end
+
+-- ==============================================================================
+-- FEATURE: FPS BOOST  [from script 1]
+-- ==============================================================================
+local fpsBoostApplied = false
+local function applyFpsBoost()
+    if fpsBoostApplied then
+        return
+    end
+    fpsBoostApplied = true
+
+    pcall(function()
+        local Lighting = game:GetService("Lighting")
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 9e9
+        settings().Rendering.QualityLevel = 1
+    end)
+
+    for _, v in pairs(workspace:GetDescendants()) do
+        pcall(function()
+            if v:IsA("BasePart") and not v:IsA("MeshPart") then
+                v.Material = Enum.Material.SmoothPlastic
+                v.Reflectance = 0
+            elseif v:IsA("Decal") or v:IsA("Texture") then
+                v.Transparency = 1
+            end
+        end)
+    end
+
+    Library:Notify("FPS Boost applied")
+end
+
+-- ==============================================================================
+-- WINDOW & TABS
+-- ==============================================================================
+local Window = Library:CreateWindow({
+    Title = "DYHUB",
+    Footer = "Greedy Growers | Free Version | BETA",
+    Icon = 104487529937663,
+    NotifySide = "Right",
+    Size = UDim2.fromOffset(600, 450),
+    ShowCustomCursor = false,
+})
+
+Library.ShowCustomCursor = false
+
+local Tabs = {
+    Info = Window:AddTab("Info", "info"),
+    Seeds = Window:AddTab("Seeds", "sprout"),
+    Farm = Window:AddTab("Farm", "trees"),
+    Plot = Window:AddTab("Plot", "map"),
+    Misc = Window:AddTab("Misc", "wrench"),
+    Settings = Window:AddTab("Settings", "settings"),
+}
+
+-- ==============================================================================
+-- TAB: INFO
+-- ==============================================================================
+local InfoGroup = Tabs.Info:AddLeftGroupbox("Information", "circle-user")
+
+local executorName = "Unknown"
+pcall(function()
+    if identifyexecutor then
+        local name, version = identifyexecutor()
+        if type(name) == "string" and name ~= "" then
+            executorName = type(version) == "string" and version ~= "" and (name .. " " .. version) or name
+        end
+    end
+end)
+
+InfoGroup:AddLabel("Executor: " .. executorName, true)
+InfoGroup:AddLabel("Game: " .. GAME_NAME, true)
+InfoGroup:AddLabel("Player: " .. LocalPlayer.Name, true)
+InfoGroup:AddLabel("Status: -", true)
+
+local DiscordGroup = Tabs.Info:AddLeftGroupbox("Discord", "message-circle")
+DiscordGroup:AddButton({
+    Text = "Copy Discord Invite",
+    Func = copyDiscord,
+})
+
+local FeatureGroup = Tabs.Info:AddRightGroupbox("New Features", "sparkles")
+FeatureGroup:AddLabel("Auto Buy Seeds (All / Selected / Min Rarity / Mutated)", true)
+FeatureGroup:AddLabel("Auto Plant + Fertilizer + Weather filter", true)
+FeatureGroup:AddLabel("Auto Harvest at target multiplier + Collect Dead", true)
+FeatureGroup:AddLabel("Auto Plant Plot (grid placement)", true)
+FeatureGroup:AddLabel("Auto Pickup Fruit (Fruit / Mutation / Max Multiplier)", true)
+FeatureGroup:AddLabel("Auto Collect Fruit + Sell All / Sell Filter By Name", true)
+FeatureGroup:AddLabel("Auto Rebirth, Anti-AFK, FPS Boost", true)
+
+local FaqGroup = Tabs.Info:AddRightGroupbox("FAQ", "circle-help")
+FaqGroup:AddLabel("Q: Where do I set configs?", true)
+FaqGroup:AddLabel("A: Use the Settings tab - Save/Load configs.", true)
+FaqGroup:AddLabel("Q: Harvest before lightning hits?", true)
+FaqGroup:AddLabel("A: No - multiplier crashes the round, harvest before it.", true)
+
+-- ==============================================================================
+-- TAB: SEEDS
+-- ==============================================================================
+local BuyGroup = Tabs.Seeds:AddLeftGroupbox("Auto Buy Seeds", "shopping-cart")
+
+BuyGroup:AddToggle("AutoBuySeeds", {
+    Text = "Auto Buy Seeds",
+    Default = false,
+})
+
+BuyGroup:AddDropdown("BuyMode", {
+    Text = "Buy Mode",
+    Values = { "Minimum Rarity", "Selected Seeds", "Buy All" },
+    Default = "Minimum Rarity",
+    Multi = false,
+})
+
+BuyGroup:AddDropdown("BuyMinRarity", {
+    Text = "Minimum Rarity",
+    Values = RARITY_NAMES,
+    Default = RARITY_NAMES[1],
+    Multi = false,
+})
+
+BuyGroup:AddDropdown("BuySeeds", {
+    Text = "Seeds To Buy",
+    Values = SEED_NAMES,
+    Default = {},
+    Multi = true,
+    Callback = function(value)
+        local set = {}
+        for name, state in value do
+            if state then
+                local key = SEED_NAME_TO_KEY[name]
+                if key then
+                    set[key] = true
+                end
+            end
+        end
+        wantedSeeds = set
+    end,
+})
+
+BuyGroup:AddToggle("BuyMutatedOnly", {
+    Text = "Mutated Seeds Only",
+    Default = false,
+})
+
+local BuyLimitGroup = Tabs.Seeds:AddRightGroupbox("Limits", "sliders-horizontal")
+
+BuyLimitGroup:AddInput("BuyMaxCost", {
+    Text = "Max Cost Per Seed (0=off)",
+    Default = "0",
+    Numeric = true,
+    Finished = false,
+    ClearTextOnFocus = false,
+})
+
+BuyLimitGroup:AddInput("BuyReserve", {
+    Text = "Coin Reserve",
+    Default = "0",
+    Numeric = true,
+    Finished = false,
+    ClearTextOnFocus = false,
+})
+
+BuyLimitGroup:AddToggle("BuyNotify", {
+    Text = "Notify On Purchase",
+    Default = false,
+})
+
+BuyLimitGroup:AddSlider("BuyActionDelay", {
+    Text = "Action Delay",
+    Default = 0.2,
+    Min = 0.1,
+    Max = 2,
+    Rounding = 2,
+})
+
+BuyLimitGroup:AddSlider("BuyLoopDelay", {
+    Text = "Loop Delay",
+    Default = 0.5,
+    Min = 0.1,
+    Max = 10,
+    Rounding = 1,
+})
+
+-- ==============================================================================
+-- TAB: FARM
+-- ==============================================================================
+local HarvestGroup = Tabs.Farm:AddLeftGroupbox("Auto Harvest", "apple")
+
+HarvestGroup:AddToggle("AutoHarvest", {
+    Text = "Auto Harvest",
+    Default = false,
+})
+
+HarvestGroup:AddInput("HarvestMultiplier", {
+    Text = "Harvest Multiplier",
+    Default = "2",
+    Numeric = true,
+    Finished = false,
+    ClearTextOnFocus = false,
+})
+
+local function greenLabel(text)
+    HarvestGroup:AddLabel('<font color="rgb(85, 255, 85)">' .. text .. "</font>", true)
+end
+
+greenLabel("Examples")
+greenLabel("1 = 1x")
+greenLabel("1.50 = 1.50x")
+greenLabel("0.50 = 0.5x")
+
+HarvestGroup:AddToggle("AutoCollectDead", {
+    Text = "Auto Collect Dead Trees",
+    Default = true,
+})
+
+HarvestGroup:AddToggle("HarvestNotify", {
+    Text = "Notify On Harvest",
+    Default = false,
+})
+
+local FruitGroup = Tabs.Farm:AddLeftGroupbox("Auto Collect Fruit", "grape")
+
+FruitGroup:AddToggle("AutoCollectFruit", {
+    Text = "Auto Collect Fruit",
+    Default = false,
+})
+
+FruitGroup:AddToggle("HarvestTeleport", {
+    Text = "Teleport To Each Tree",
+    Default = false,
+})
+
+FruitGroup:AddToggle("HarvestCollectAll", {
+    Text = "Use Collect All",
+    Default = false,
+})
+
+FruitGroup:AddSlider("HarvestActionDelay", {
+    Text = "Action Delay",
+    Default = 0.1,
+    Min = 0.05,
+    Max = 2,
+    Rounding = 2,
+})
+
+FruitGroup:AddSlider("HarvestLoopDelay", {
+    Text = "Loop Delay",
+    Default = 1,
+    Min = 0.2,
+    Max = 20,
+    Rounding = 1,
+})
+
+local PlantGroup = Tabs.Farm:AddRightGroupbox("Auto Plant", "sprout")
+
+PlantGroup:AddToggle("AutoPlant", {
+    Text = "Auto Plant",
+    Default = false,
+})
+
+PlantGroup:AddDropdown("PlantMode", {
+    Text = "Seed Selection",
+    Values = { "Any Seed", "Selected Seeds", "Highest Value", "Lowest Value" },
+    Default = "Any Seed",
+    Multi = false,
+})
+
+PlantGroup:AddDropdown("PlantSeeds", {
+    Text = "Seeds To Plant",
+    Values = SEED_NAMES,
+    Default = {},
+    Multi = true,
+    Callback = function(value)
+        local set = {}
+        for name, state in value do
+            if state then
+                local key = SEED_NAME_TO_KEY[name]
+                if key then
+                    set[key] = true
+                end
+            end
+        end
+        wantedPlantSeeds = set
+    end,
+})
+
+PlantGroup:AddDropdown("PlantFertilizer", {
+    Text = "Fertilizer",
+    Values = FERTILIZER_NAMES,
+    Default = "None",
+    Multi = false,
+})
+
+PlantGroup:AddToggle("PlantDuringWeatherOnly", {
+    Text = "Plant During Weather Only",
+    Default = false,
+})
+
+PlantGroup:AddDropdown("PlantWeathers", {
+    Text = "Plant Weathers",
+    Values = WEATHER_NAMES,
+    Default = WEATHER_NAMES,
+    Multi = true,
+    Callback = function(value)
+        local set = {}
+        for name, state in value do
+            if state then
+                local key = WEATHER_NAME_TO_KEY[name]
+                if key then
+                    set[key] = true
+                end
+            end
+        end
+        wantedWeathers = set
+    end,
+})
+
+PlantGroup:AddToggle("PlantNotify", {
+    Text = "Notify On Plant",
+    Default = false,
+})
+
+PlantGroup:AddSlider("PlantLoopDelay", {
+    Text = "Loop Delay",
+    Default = 1,
+    Min = 0.2,
+    Max = 20,
+    Rounding = 1,
+})
+
+local SellGroup = Tabs.Farm:AddRightGroupbox("Auto Sell", "banknote")
+
+SellGroup:AddToggle("AutoSellFruits", {
+    Text = "Auto Sell Fruits",
+    Default = false,
+})
+
+SellGroup:AddToggle("AutoSellAll", {
+    Text = "Auto Sell All",
+    Default = false,
+})
+
+SellGroup:AddToggle("SellTeleport", {
+    Text = "Teleport To Sell Stand",
+    Default = false,
+})
+
+SellGroup:AddSlider("SellMinFruits", {
+    Text = "Min Fruit Count",
+    Default = 1,
+    Min = 1,
+    Max = 50,
+    Rounding = 0,
+})
+
+SellGroup:AddSlider("SellActionDelay", {
+    Text = "Action Delay",
+    Default = 0.2,
+    Min = 0.1,
+    Max = 2,
+    Rounding = 2,
+})
+
+SellGroup:AddSlider("SellLoopDelay", {
+    Text = "Loop Delay",
+    Default = 2,
+    Min = 0.5,
+    Max = 30,
+    Rounding = 1,
+})
+
+local SellFilterGroup = Tabs.Farm:AddRightGroupbox("Sell Filter By Name", "filter")
+
+SellFilterGroup:AddDropdown("SellNames", {
+    Text = "Items To Sell",
+    Values = SellableList,
+    Default = {},
+    Multi = true,
+    Callback = function(value)
+        local set = {}
+        for name, state in value do
+            if state then
+                set[name] = true
+            end
+        end
+        wantedSellNames = set
+    end,
+})
+
+SellFilterGroup:AddToggle("AutoSellByName", {
+    Text = "Auto Sell Selected Names",
+    Default = false,
+})
+
+local RebirthGroup = Tabs.Farm:AddRightGroupbox("Auto Rebirth", "refresh-cw")
+
+RebirthGroup:AddToggle("AutoRebirth", {
+    Text = "Auto Rebirth",
+    Default = false,
+})
+
+RebirthGroup:AddSlider("RebirthMaxLevel", {
+    Text = "Max Rebirth Level",
+    Default = RebirthConfig.MaxLevel,
+    Min = 1,
+    Max = RebirthConfig.MaxLevel,
+    Rounding = 0,
+})
+
+RebirthGroup:AddToggle("RebirthNotify", {
+    Text = "Notify On Rebirth",
+    Default = true,
+})
+
+RebirthGroup:AddSlider("RebirthLoopDelay", {
+    Text = "Loop Delay",
+    Default = 5,
+    Min = 1,
+    Max = 60,
+    Rounding = 1,
+})
+
+-- ==============================================================================
+-- TAB: PLOT
+-- ==============================================================================
+local PlantPlotGroup = Tabs.Plot:AddLeftGroupbox("Auto Plant Plot", "trees")
+
+PlantPlotGroup:AddDropdown("PlotPlants", {
+    Text = "Plants To Plot",
+    Values = PlantList,
+    Default = {},
+    Multi = true,
+})
+
+PlantPlotGroup:AddToggle("AutoPlantPlot", {
+    Text = "Auto Plant Plot",
+    Default = false,
+})
+
+PlantPlotGroup:AddSlider("PlotLoopDelay", {
+    Text = "Loop Delay",
+    Default = 2,
+    Min = 0.5,
+    Max = 20,
+    Rounding = 1,
+})
+
+local PickupGroup = Tabs.Plot:AddRightGroupbox("Auto Pickup Fruit", "cherry")
+
+PickupGroup:AddDropdown("PickupFruits", {
+    Text = "Target Fruits",
+    Values = PickupFruitList,
+    Default = {},
+    Multi = true,
+})
+
+PickupGroup:AddDropdown("PickupMutations", {
+    Text = "Target Mutations (optional)",
+    Values = MutationList,
+    Default = {},
+    Multi = true,
+})
+
+PickupGroup:AddInput("PickupMaxMultiplier", {
+    Text = "Max Multiplier (0=all)",
+    Default = "0",
+    Numeric = true,
+    Finished = false,
+    ClearTextOnFocus = false,
+})
+
+PickupGroup:AddToggle("AutoPickupFruit", {
+    Text = "Auto Pickup Fruit",
+    Default = false,
+})
+
+PickupGroup:AddSlider("PickupLoopDelay", {
+    Text = "Loop Delay",
+    Default = 0.5,
+    Min = 0.1,
+    Max = 10,
+    Rounding = 1,
+})
+
+-- ==============================================================================
+-- TAB: MISC
+-- ==============================================================================
+local MiscGroup = Tabs.Misc:AddLeftGroupbox("Miscellaneous", "wrench")
+
+MiscGroup:AddToggle("AntiAfk", {
+    Text = "Anti-AFK",
+    Default = true,
+})
+
+MiscGroup:AddButton("Apply FPS Boost", applyFpsBoost)
+
+local MiscInfo = Tabs.Misc:AddRightGroupbox("Notes", "info")
+MiscInfo:AddLabel("FPS Boost lowers graphics quality.", true)
+MiscInfo:AddLabel("Auto Plant Plot requires the item in your hotbar.", true)
+MiscInfo:AddLabel("Auto Pickup Fruit filters use the fruit billboard text.", true)
+
+-- ==============================================================================
+-- TAB: SETTINGS
+-- ==============================================================================
+local MenuGroup = Tabs.Settings:AddLeftGroupbox("Menu", "settings")
+
+MenuGroup:AddLabel("Menu Keybind"):AddKeyPicker("MenuKeybind", {
+    Default = "RightShift",
+    NoUI = true,
+    Text = "Menu Keybind",
+})
+
+MenuGroup:AddButton("Unload", function()
+    Library:Unload()
+end)
+
+-- ==============================================================================
+-- ANTI-AFK
+-- ==============================================================================
+local antiAfkLastInput = tick()
+local antiAfkLastTap = tick()
+
+pcall(function()
+    for _, connection in ipairs(getconnections(LocalPlayer.Idled)) do
+        pcall(function()
+            connection:Disable()
+        end)
+    end
+end)
+
+local function antiAfkTap()
+    local camera = workspace.CurrentCamera
+    if not camera then
+        return
+    end
+    VirtualUser:Button2Down(Vector2.new(0, 0), camera.CFrame)
+    task.wait(0.1)
+    VirtualUser:Button2Up(Vector2.new(0, 0), camera.CFrame)
+    antiAfkLastTap = tick()
+end
+
+local antiAfkBeganConnection = UserInputService.InputBegan:Connect(function()
+    antiAfkLastInput = tick()
+end)
+
+local antiAfkChangedConnection = UserInputService.InputChanged:Connect(function(input)
+    local inputType = input.UserInputType
+    if inputType == Enum.UserInputType.MouseMovement or inputType == Enum.UserInputType.Gamepad1 then
+        antiAfkLastInput = tick()
+    end
+end)
+
+Library.ToggleKeybind = Options.MenuKeybind
+
+Library:OnUnload(function()
+    pcall(function()
+        antiAfkBeganConnection:Disconnect()
+        antiAfkChangedConnection:Disconnect()
+    end)
+    print(GAME_NAME .. " script unloaded")
+end)
+
+-- ==============================================================================
+-- THEME & CONFIG MANAGERS
+-- ==============================================================================
+ThemeManager:SetLibrary(Library)
+ThemeManager:SetFolder("DYHUB_GG")
+ThemeManager:SaveDefault("Jester")
+
+SaveManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+SaveManager:SetFolder("DYHUB_GG/GGNEW")
+SaveManager:BuildConfigSection(Tabs.Settings)
+
+ThemeManager:ApplyToTab(Tabs.Settings)
+ThemeManager:LoadDefault()
+
+SaveManager:LoadAutoloadConfig()
+
+-- ==============================================================================
+-- BACKGROUND LOOPS
+-- ==============================================================================
+task.spawn(function()
+    while not Library.Unloaded do
+        if Toggles.AutoBuySeeds.Value then
+            pcall(doBuySeeds)
+        end
+        task.wait(Options.BuyLoopDelay.Value or 0.5)
+    end
+end)
+
+task.spawn(function()
+    while not Library.Unloaded do
+        if Toggles.AutoHarvest.Value or Toggles.AutoCollectDead.Value or Toggles.AutoPlant.Value then
+            pcall(refreshRound)
+        else
+            activeRound = nil
+        end
+        task.wait(0.5)
+    end
+end)
+
+task.spawn(function()
+    while not Library.Unloaded do
+        if Toggles.AutoHarvest.Value or Toggles.AutoCollectDead.Value then
+            pcall(doRoundHarvest)
+        end
+        task.wait(0.05)
+    end
+end)
+
+task.spawn(function()
+    while not Library.Unloaded do
+        if Toggles.AutoPlant.Value then
+            pcall(doPlant)
+        end
+        task.wait(Options.PlantLoopDelay.Value or 1)
+    end
+end)
+
+task.spawn(function()
+    while not Library.Unloaded do
+        if Toggles.AutoCollectFruit.Value then
+            pcall(doHarvest)
+        end
+        task.wait(Options.HarvestLoopDelay.Value or 1)
+    end
+end)
+
+task.spawn(function()
+    while not Library.Unloaded do
+        if Toggles.AutoSellFruits.Value then
+            pcall(doSellFruits)
+        end
+        if Toggles.AutoSellAll.Value then
+            pcall(doSellAll)
+        end
+        if Toggles.AutoSellByName.Value then
+            pcall(doSellByName)
+        end
+        task.wait(Options.SellLoopDelay.Value or 2)
+    end
+end)
+
+task.spawn(function()
+    while not Library.Unloaded do
+        if Toggles.AutoRebirth.Value then
+            pcall(doRebirth)
+        end
+        task.wait(Options.RebirthLoopDelay.Value or 5)
+    end
+end)
+
+-- [Script 1] Auto Plant Plot loop
+task.spawn(function()
+    while not Library.Unloaded do
+        if Toggles.AutoPlantPlot.Value then
+            pcall(doPlantPlot)
+        end
+        task.wait(Options.PlotLoopDelay.Value or 2)
+    end
+end)
+
+-- [Script 1] Auto Pickup Fruit loop
+task.spawn(function()
+    while not Library.Unloaded do
+        if Toggles.AutoPickupFruit.Value then
+            pcall(doPickupFruit)
+        end
+        task.wait(Options.PickupLoopDelay.Value or 0.5)
+    end
+end)
+
+task.spawn(function()
+    while not Library.Unloaded do
+        task.wait(2)
+        if Toggles.AntiAfk.Value then
+            local idle = tick() - antiAfkLastInput
+            local sinceTap = tick() - antiAfkLastTap
+            if idle >= 300 and sinceTap >= 60 then
+                pcall(antiAfkTap)
+            elseif idle < 300 and sinceTap >= 300 then
+                pcall(antiAfkTap)
+            end
+        end
+    end
+end)
+
+Library:Notify(GAME_NAME .. " script loaded")
