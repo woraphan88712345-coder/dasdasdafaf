@@ -1,0 +1,1446 @@
+repeat task.wait() until game:IsLoaded()
+
+-- ═════════════════════════════════════════════════════════════════
+--  LOAD UI (WindUI)
+-- ═════════════════════════════════════════════════════════════════
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+local version = "BETA"
+local ver     = "v26.51"
+
+if setfpscap then
+    setfpscap(1000000)
+    WindUI:Notify({ Title = "Service", Content = "FPS Unlocked! | " .. ver, Duration = 3, Icon = "cpu" })
+end
+
+-- ═════════════════════════════════════════════════════════════════
+--  SERVICES
+-- ═════════════════════════════════════════════════════════════════
+local RunService        = game:GetService("RunService")
+local Workspace         = game:GetService("Workspace")
+local Lighting          = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService  = game:GetService("UserInputService")
+local Players           = game:GetService("Players")
+local HttpService       = game:GetService("HttpService")
+local StarterGui        = game:GetService("StarterGui")
+local TeleportService   = game:GetService("TeleportService")
+local TweenService      = game:GetService("TweenService")
+local VirtualUser       = game:GetService("VirtualUser")
+local StatsService      = game:GetService("Stats")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui   = LocalPlayer:WaitForChild("PlayerGui")
+local Camera      = Workspace.CurrentCamera
+
+-- ═════════════════════════════════════════════════════════════════
+--  STATE VARIABLES (Merged from FreeHub + Main.lua)
+-- ═════════════════════════════════════════════════════════════════
+local AutofarmEnabled       = false
+local EggESPEnabled         = false
+local BillboardESPEnabled   = false
+local AutoNestEnabled       = false
+local AutoHatchEnabled      = false
+local AutoUpgradeEnabled    = false
+local InfZoomEnabled        = false
+local FastModeEnabled       = false
+local AntiAFKEnabled        = false
+local NoClipEnabled         = false
+local InfJumpEnabled        = false
+local WalkSpeedEnabled      = false
+local JumpPowerEnabled      = false
+
+local FlySpeed    = 400
+local WalkSpeedVal  = 16
+local JumpPowerVal  = 50
+local MinValueFilter = 0
+local MaxValueFilter = 0   -- 0 = ไม่จำกัดค่าสูงสุด
+
+local SelectedEggsLookup = {}
+local NestEggsLookup     = {}
+local ActiveHighlights   = {}
+
+local NoclipConnection  = nil
+local AntiAFKConnection = nil
+
+local OriginalLightingSettings = {
+    GlobalShadows = Lighting.GlobalShadows,
+    FogEnd        = Lighting.FogEnd,
+    FogStart      = Lighting.FogStart,
+}
+
+local SessionStartTime = os.time()
+local EggsGrabbedCount = 0
+local EggsPlacedCount  = 0
+local EggsHatchedCount = 0
+
+local ExtractedEggsList = {
+    "Dragon Egg", "Giant Egg", "White Egg", "Brown Egg", "Cracked Egg",
+    "Easter Egg", "Stone Egg", "Leaf Egg", "Mushroom Egg", "Flower Egg",
+    "Slime Egg", "Ice Egg", "Glass Egg", "Golden Egg", "Diamond Egg",
+    "Crystal Egg", "Skull Egg", "Asteroid Egg", "Dominus Egg", "Flaming Egg",
+    "Sinister Egg", "Soul Egg", "Aurora Egg", "Galaxy Egg", "Blackhole Egg",
+    "Cherub Egg"
+}
+
+--  CHARACTER CACHE
+-- ═════════════════════════════════════════════════════════════════
+local Character        = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Humanoid         = Character:WaitForChild("Humanoid")
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    Character        = char
+    Humanoid         = char:WaitForChild("Humanoid")
+    HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
+
+    -- คืนค่า Player Options ใหม่ทุกครั้งที่เกิด (ถ้าเปิดไว้)
+    task.wait(0.5)
+    if WalkSpeedEnabled then
+        Humanoid.WalkSpeed = WalkSpeedVal
+    end
+    if JumpPowerEnabled then
+        Humanoid.UseJumpPower = true
+        Humanoid.JumpPower = JumpPowerVal
+    end
+end)
+
+-- ═════════════════════════════════════════════════════════════════
+-- ═════════════════════════════════════════════════════════════════
+--  VERSION CHECK (from UI KIT)
+-- ═════════════════════════════════════════════════════════════════
+local FreeVersion    = "Free Version"
+local PremiumVersion = "Premium Version"
+
+local function checkVersion(playerName)
+    local url = "https://raw.githubusercontent.com/mabdu21/2askdkn21h3u21ddaa/refs/heads/main/Main/Premium/listpremium.lua"
+    local success, response = pcall(function() return game:HttpGet(url) end)
+    if not success then return FreeVersion end
+    local func = loadstring(response)
+    if not func then return FreeVersion end
+    local ok, premiumData = pcall(func)
+    if not ok then return FreeVersion end
+    return premiumData and premiumData[playerName] and PremiumVersion or FreeVersion
+end
+
+local userversion = checkVersion(LocalPlayer.Name)
+local isPremium   = (userversion == PremiumVersion)
+
+-- ═════════════════════════════════════════════════════════════════
+--  WINDOW (WindUI)
+-- ═════════════════════════════════════════════════════════════════
+local Window = WindUI:CreateWindow({
+    Title      = "DYHUB",
+    IconThemed = true,
+    Icon       = "rbxassetid://104487529937663",
+    Author     = "Ride A Pet | " .. userversion,
+    Folder     = "DYHUB_RAP",
+    Size       = UDim2.fromOffset(500, 420),
+    Transparent = true,
+    Theme      = "Dark",
+    BackgroundImageTransparency = 0.8,
+    HasOutline = false,
+    HideSearchBar    = true,
+    ScrollBarEnabled = true,
+    User = { Enabled = true, Anonymous = false },
+})
+
+Window:SetToggleKey(Enum.KeyCode.K)
+pcall(function() Window:Tag({ Title = version, Color = Color3.fromHex("#db7093") }) end)
+Window:EditOpenButton({
+    Title           = "DYHUB - Open",
+    Icon            = "monitor",
+    CornerRadius    = UDim.new(0, 6),
+    StrokeThickness = 2,
+    Color           = ColorSequence.new(Color3.fromRGB(30,30,30), Color3.fromRGB(255,255,255)),
+    Draggable       = true,
+})
+
+-- ═════════════════════════════════════════════════════════════════
+--  CONFIG SYSTEM (from UI KIT)
+-- ═════════════════════════════════════════════════════════════════
+local ConfigFolder = "DYHUB_EGG"
+
+local CustomConfig = {}
+CustomConfig.__index = CustomConfig
+
+function CustomConfig.new()
+    local self      = setmetatable({}, CustomConfig)
+    self.ConfigData = {}
+    self.ConfigPath = ConfigFolder .. "/EGG_config.json"
+    self._autoSaveThread = nil
+    self._autoSaveDelay  = 15
+    if not isfolder(ConfigFolder) then makefolder(ConfigFolder) end
+    self:Load()
+    return self
+end
+
+function CustomConfig:Set(key, value) self.ConfigData[key] = value end
+
+function CustomConfig:Get(key, default)
+    local v = self.ConfigData[key]
+    return v ~= nil and v or default
+end
+
+function CustomConfig:Save()
+    local ok, err = pcall(function()
+        writefile(self.ConfigPath, HttpService:JSONEncode(self.ConfigData))
+    end)
+    if not ok then warn("[DYHUB] Save failed:", err) end
+end
+
+function CustomConfig:Load()
+    if isfile(self.ConfigPath) then
+        local ok, result = pcall(function()
+            return HttpService:JSONDecode(readfile(self.ConfigPath))
+        end)
+        if ok and type(result) == "table" then
+            self.ConfigData = result
+            print("[DYHUB] Config loaded!")
+        else
+            warn("[DYHUB] Failed to load config, using defaults")
+            self.ConfigData = {}
+        end
+    else
+        print("[DYHUB] No config found, creating new one")
+        self.ConfigData = {}
+    end
+end
+
+function CustomConfig:AutoSave(interval)
+    if self._autoSaveThread then
+        task.cancel(self._autoSaveThread)
+        self._autoSaveThread = nil
+    end
+    if interval and interval > 0 then
+        self._autoSaveDelay  = interval
+        self._autoSaveThread = task.spawn(function()
+            while true do
+                task.wait(self._autoSaveDelay or 15)
+                self:Save()
+            end
+        end)
+    end
+end
+
+local Config = CustomConfig.new()
+
+-- ═════════════════════════════════════════════════════════════════
+--  APPLY SAVED CONFIG TO STATE
+-- ═════════════════════════════════════════════════════════════════
+FlySpeed         = Config:Get("FlySpeed", 400)
+WalkSpeedVal     = Config:Get("WalkSpeedVal", 16)
+JumpPowerVal     = Config:Get("JumpPowerVal", 50)
+MinValueFilter   = Config:Get("MinValueFilter", 0)
+MaxValueFilter   = Config:Get("MaxValueFilter", 0)
+AntiAFKEnabled   = Config:Get("AntiAFK", false)
+InfZoomEnabled   = Config:Get("InfZoom", false)
+
+-- restore egg selections
+do
+    local savedSel = Config:Get("SelectedEggs", {})
+    if type(savedSel) == "table" then
+        for _, name in ipairs(savedSel) do SelectedEggsLookup[name] = true end
+    end
+    local savedNest = Config:Get("NestEggs", {})
+    if type(savedNest) == "table" then
+        for _, name in ipairs(savedNest) do NestEggsLookup[name] = true end
+    end
+end
+
+if AntiAFKEnabled then
+    AntiAFKConnection = LocalPlayer.Idled:Connect(function()
+        VirtualUser:Button2Down(Vector2.new(0, 0), Camera.CFrame)
+        task.wait(1)
+        VirtualUser:Button2Up(Vector2.new(0, 0), Camera.CFrame)
+    end)
+end
+if InfZoomEnabled then
+    LocalPlayer.CameraMaxZoomDistance = 100000
+end
+
+if Config:Get("AutoSaveEnabled", true) then
+    Config:AutoSave(Config:Get("AutoSaveDelay", 15))
+end
+
+-- ═════════════════════════════════════════════════════════════════
+--  HELPER : NOTIFY / TOAST
+-- ═════════════════════════════════════════════════════════════════
+local function Notify(title, content, duration)
+    pcall(function()
+        WindUI:Notify({ Title = title or "DYHUB", Content = content or "", Duration = duration or 3, Icon = "bell" })
+    end)
+end
+
+-- ═════════════════════════════════════════════════════════════════
+--  HELPER : VALUE PARSER (from Main.lua)  "10k" "1.5m" "2b"
+-- ═════════════════════════════════════════════════════════════════
+local function parseValueText(text)
+    if type(text) ~= "string" or text == "" then return 0 end
+    local cleanText = text:lower():gsub("%s+", "")
+    local numStr, unit = cleanText:match("([%d%.]+)([kmb]?)")
+    local num = tonumber(numStr)
+    if not num then return 0 end
+    if unit == "k" then return num * 1000
+    elseif unit == "m" then return num * 1000000
+    elseif unit == "b" then return num * 1000000000 end
+    return num
+end
+
+local function FormatNumber(n)
+    n = tonumber(n) or 0
+    if n >= 1e9 then return string.format("%.2fb", n / 1e9)
+    elseif n >= 1e6 then return string.format("%.2fm", n / 1e6)
+    elseif n >= 1e3 then return string.format("%.1fk", n / 1e3) end
+    return tostring(math.floor(n))
+end
+
+-- ═════════════════════════════════════════════════════════════════
+--  HELPER : EGG VALUE SCANNER (from Main.lua)
+-- ═════════════════════════════════════════════════════════════════
+local function GetEggValue(eggModel)
+    if not eggModel then return 0 end
+    local highestValue = 0
+    for _, desc in ipairs(eggModel:GetDescendants()) do
+        if desc:IsA("TextLabel") and desc.Text ~= "" then
+            local val = parseValueText(desc.Text)
+            if val > highestValue then highestValue = val end
+        end
+    end
+    return highestValue
+end
+
+-- ═════════════════════════════════════════════════════════════════
+--  HELPER : PLAYER PLOT (from FreeHub)
+-- ═════════════════════════════════════════════════════════════════
+local function GetPlayerPlot()
+    if not Workspace:FindFirstChild("Plots") then return nil end
+    for _, plot in ipairs(Workspace.Plots:GetChildren()) do
+        local data = plot:FindFirstChild("Data")
+        if data and data:FindFirstChild("Owner") then
+            local ownerVal = data.Owner.Value
+            if ownerVal == LocalPlayer or ownerVal == LocalPlayer.Name then
+                return plot
+            end
+        end
+    end
+    return nil
+end
+
+local function GetPlayerPlotCenter()
+    local plot = GetPlayerPlot()
+    if not plot then return nil end
+
+    local centerCFrame
+    if plot:IsA("Model") then
+        centerCFrame = plot:GetPivot()
+    elseif plot:IsA("BasePart") then
+        centerCFrame = plot.CFrame
+    else
+        local base = plot:FindFirstChild("Base") or plot:FindFirstChild("Baseplate") or plot:FindFirstChildWhichIsA("BasePart")
+        centerCFrame = base and base.CFrame or CFrame.new()
+    end
+    return centerCFrame.Position + Vector3.new(0, 4, 0)
+end
+
+-- ═════════════════════════════════════════════════════════════════
+--  HELPER : NEST / EQUIP (from FreeHub)
+-- ═════════════════════════════════════════════════════════════════
+local function IsNestFree(nest)
+    if not nest then return false end
+    if nest:GetAttribute("Occupied") == true or nest:GetAttribute("HasEgg") == true then
+        return false
+    end
+    for _, child in ipairs(nest:GetChildren()) do
+        if child:GetAttribute("EggKey") or child.Name:lower():find("egg") then
+            return false
+        end
+    end
+    return true
+end
+
+local function CheckAndEquipNestEgg()
+    if next(NestEggsLookup) == nil then return true end
+
+    if Character then
+        for _, item in ipairs(Character:GetChildren()) do
+            if item:IsA("Tool") and NestEggsLookup[item.Name] then
+                return true
+            end
+        end
+    end
+
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if backpack then
+        for _, item in ipairs(backpack:GetChildren()) do
+            if item:IsA("Tool") and NestEggsLookup[item.Name] then
+                if Character and Character:FindFirstChildOfClass("Humanoid") then
+                    Character:FindFirstChildOfClass("Humanoid"):EquipTool(item)
+                end
+                return true
+            end
+        end
+    end
+    return true
+end
+
+-- ═════════════════════════════════════════════════════════════════
+--  HELPER : 3D FLY MOVEMENT (from FreeHub)
+-- ═════════════════════════════════════════════════════════════════
+local function FlyToTarget(target)
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return false end
+    local hrp = char.HumanoidRootPart
+
+    while AutofarmEnabled and char and hrp do
+        if typeof(target) == "Instance" then
+            if not (target.Parent and target:IsDescendantOf(Workspace)) then
+                return false
+            end
+        end
+
+        local targetPos = typeof(target) == "Vector3" and target or (target:IsA("Model") and target:GetPivot().Position or target.Position)
+        local currentPos = hrp.Position
+        local distance = (targetPos - currentPos).Magnitude
+
+        if distance <= 4 then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            return true
+        end
+
+        local direction = (targetPos - currentPos).Unit
+        local dt = RunService.Heartbeat:Wait()
+
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        local moveStep = direction * (FlySpeed * dt)
+
+        if moveStep.Magnitude > distance then
+            hrp.CFrame = CFrame.new(targetPos, targetPos + direction)
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            return true
+        else
+            hrp.CFrame = CFrame.new(currentPos + moveStep, currentPos + moveStep + direction)
+        end
+    end
+    return false
+end
+
+-- ═════════════════════════════════════════════════════════════════
+--  HELPER : INTERACT EGG (from FreeHub)
+-- ═════════════════════════════════════════════════════════════════
+local function InteractWithEgg(egg)
+    if not (egg and egg.Parent and egg:IsDescendantOf(Workspace)) then return end
+    local prompt = egg:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if prompt then
+        if fireproximityprompt then
+            fireproximityprompt(prompt)
+        else
+            prompt:InputHoldBegin()
+            task.wait(0.05)
+            prompt:InputHoldEnd()
+        end
+        EggsGrabbedCount = EggsGrabbedCount + 1
+    end
+end
+
+-- ═════════════════════════════════════════════════════════════════
+--  HELPER : NO CLIP (from Main.lua / FreeHub)
+-- ═════════════════════════════════════════════════════════════════
+local function SetNoclip(enabled)
+    if enabled then
+        if not NoclipConnection then
+            NoclipConnection = RunService.Stepped:Connect(function()
+                local char = LocalPlayer.Character
+                if char then
+                    for _, part in ipairs(char:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+                end
+            end)
+        end
+    else
+        if NoclipConnection then
+            NoclipConnection:Disconnect()
+            NoclipConnection = nil
+        end
+    end
+end
+
+-- ═════════════════════════════════════════════════════════════════
+--  HELPER : UPGRADE REMOTE (from Main.lua)
+-- ═════════════════════════════════════════════════════════════════
+local function getUpgradeRemote()
+    local success, result = pcall(function()
+        return ReplicatedStorage:WaitForChild("Remotes", 5)
+            :WaitForChild("Game", 5)
+            :WaitForChild("Plot", 5)
+            :WaitForChild("Upgrades", 5)
+    end)
+    return success and result or nil
+end
+
+-- ═════════════════════════════════════════════════════════════════
+--  HELPER : TELEPORTS (from FreeHub)
+-- ═════════════════════════════════════════════════════════════════
+local function TeleportToMyPlot()
+    local plotCenter = GetPlayerPlotCenter()
+    if plotCenter then
+        local char = LocalPlayer.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            char.HumanoidRootPart.CFrame = CFrame.new(plotCenter)
+            Notify("Teleported", "Moved to your plot", 2)
+        end
+    else
+        Notify("Teleport Error", "Could not find your plot!", 3)
+    end
+end
+
+local function TeleportToStall(stallName)
+    local stallsFolder = Workspace:FindFirstChild("Stalls")
+    if not stallsFolder then
+        Notify("Teleport Error", "Workspace.Stalls folder not found!", 3)
+        return
+    end
+
+    local stall = stallsFolder:FindFirstChild(stallName)
+    if not stall then
+        Notify("Teleport Error", "Stall '" .. stallName .. "' not found!", 3)
+        return
+    end
+
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+
+    local targetCF
+    if stall:IsA("Model") then
+        targetCF = stall:GetPivot()
+    elseif stall:IsA("BasePart") then
+        targetCF = stall.CFrame
+    else
+        local part = stall:FindFirstChildWhichIsA("BasePart", true)
+        if part then targetCF = part.CFrame end
+    end
+
+    if targetCF then
+        char.HumanoidRootPart.CFrame = targetCF * CFrame.new(0, 2, -6) * CFrame.Angles(0, math.pi, 0)
+        Notify("Teleported", "Moved to " .. stallName, 2)
+    end
+end
+
+-- ═════════════════════════════════════════════════════════════════
+--  HELPER : TOP HUD BAR (from FreeHub)
+-- ═════════════════════════════════════════════════════════════════
+local function BuildTopBarHUD()
+    if PlayerGui:FindFirstChild("StallTeleportBar") then
+        PlayerGui.StallTeleportBar:Destroy()
+    end
+
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "StallTeleportBar"
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.DisplayOrder = -10
+    ScreenGui.Parent = PlayerGui
+
+    local Container = Instance.new("Frame")
+    Container.Name = "Container"
+    Container.Size = UDim2.new(0, 620, 0, 42)
+    Container.Position = UDim2.new(0.5, 0, 0, 12)
+    Container.AnchorPoint = Vector2.new(0.5, 0)
+    Container.BackgroundTransparency = 1
+    Container.Parent = ScreenGui
+
+    local UIListLayout = Instance.new("UIListLayout")
+    UIListLayout.FillDirection = Enum.FillDirection.Horizontal
+    UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    UIListLayout.Padding = UDim.new(0, 8)
+    UIListLayout.Parent = Container
+
+    local buttonsData = {
+        { Text = "Egg Tracker 🥚", Target = "EggTracker", Border = Color3.fromRGB(0, 200, 255) },
+        { Text = "Food 🥩",       Target = "Food",       Border = Color3.fromRGB(190, 40, 220) },
+        { Text = "My Plot 🏡",    Target = "MyPlot",     Border = Color3.fromRGB(0, 200, 255) },
+        { Text = "Gears ⚙️",      Target = "Gears",      Border = Color3.fromRGB(190, 40, 220) },
+        { Text = "Sell 💰",       Target = "Sell",       Border = Color3.fromRGB(0, 200, 255) },
+    }
+
+    for idx, data in ipairs(buttonsData) do
+        local btn = Instance.new("TextButton")
+        btn.Name = data.Target .. "Button"
+        btn.Size = UDim2.new(0, 115, 1, 0)
+        btn.BackgroundColor3 = Color3.fromRGB(20, 18, 30)
+        btn.BackgroundTransparency = 0.25
+        btn.Text = data.Text
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.Font = Enum.Font.FredokaOne
+        btn.TextSize = 14
+        btn.TextStrokeTransparency = 0.5
+        btn.LayoutOrder = idx
+        btn.Parent = Container
+
+        local uiCorner = Instance.new("UICorner")
+        uiCorner.CornerRadius = UDim.new(0, 8)
+        uiCorner.Parent = btn
+
+        local uiStroke = Instance.new("UIStroke")
+        uiStroke.Color = data.Border
+        uiStroke.Thickness = 2
+        uiStroke.Parent = btn
+
+        btn.MouseEnter:Connect(function()
+            btn.Size = UDim2.new(0, 117, 1, 2)
+        end)
+        btn.MouseLeave:Connect(function()
+            btn.Size = UDim2.new(0, 115, 1, 0)
+        end)
+        btn.MouseButton1Click:Connect(function()
+            if data.Target == "MyPlot" then
+                TeleportToMyPlot()
+            else
+                TeleportToStall(data.Target)
+            end
+        end)
+    end
+end
+
+BuildTopBarHUD()
+
+-- ═════════════════════════════════════════════════════════════════
+--  TABS
+-- ═════════════════════════════════════════════════════════════════
+local InfoTab   = Window:Tab({ Title = "Information", Icon = "info" })
+local _D2       = Window:Divider()
+local MainTab   = Window:Tab({ Title = "Main",        Icon = "rocket" })
+local PlayerTab = Window:Tab({ Title = "Player",      Icon = "user" })
+local ESPTab    = Window:Tab({ Title = "ESP",         Icon = "eye" })
+local MiscTab   = Window:Tab({ Title = "Misc",        Icon = "wrench" })
+local _D3       = Window:Divider()
+local SetTab    = Window:Tab({ Title = "Settings",    Icon = "settings" })
+
+Window:SelectTab(1)
+
+-- ═════════════════════════════════════════════════════════════════
+--  MAIN TAB  (Autofarm / Nest / Hatch / Upgrade)
+-- ═════════════════════════════════════════════════════════════════
+MainTab:Divider()
+MainTab:Section({ Title = "Session Stats", Icon = "chart-bar" })
+
+local StatsPara = MainTab:Paragraph({
+    Title = "Live Stats",
+    Desc  = "Session: 0m | Grabbed: 0 | Placed: 0 | Hatched: 0",
+    Image = "activity", ImageSize = 26,
+})
+
+MainTab:Divider()
+MainTab:Section({ Title = "Auto Farm", Icon = "sprout" })
+
+MainTab:Paragraph({
+    Title = "How it works",
+    Desc  = "Move to the eggs listed, filter by Min/Max Value, and collect them automatically.",
+    Image = "rbxassetid://104487529937663", ImageSize = 30,
+})
+
+MainTab:Toggle({
+    Title    = "Auto Farm Egg",
+    Desc     = "Move to automatically collect the eggs.",
+    Value    = false,
+    Callback = function(v)
+        AutofarmEnabled = v
+        SetNoclip(v)
+        if v then
+            Notify("Auto Farm", "Farming started!", 2)
+        else
+            Notify("Auto Farm", "Farming stopped.", 2)
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                char.HumanoidRootPart.AssemblyLinearVelocity = Vector3.zero
+            end
+        end
+    end,
+})
+
+MainTab:Slider({
+    Title    = "Auto Farm Fly Speed",
+    Desc     = "Egg-collecting flight speed (studs/sec)",
+    Value    = { Min = 100, Max = 3000, Default = FlySpeed },
+    Step     = 50,
+    Callback = function(v)
+        FlySpeed = v
+        Config:Set("FlySpeed", v); Config:Save()
+    end,
+})
+
+MainTab:Input({
+    Title       = "Min Value Filter",
+    Desc        = "Collect only eggs with values (e.g., 500, 10k, 1m)",
+    Value       = tostring(MinValueFilter),
+    Placeholder = "0",
+    Callback    = function(text)
+        local n = parseValueText(text)
+        MinValueFilter = n
+        Config:Set("MinValueFilter", n); Config:Save()
+        Notify("Filter", "Min Value = " .. FormatNumber(n), 2)
+    end,
+})
+
+MainTab:Input({
+    Title       = "Max Value Filter",
+    Desc        = "Collect only eggs with a values (0 = unlimited)",
+    Value       = tostring(MaxValueFilter),
+    Placeholder = "0",
+    Callback    = function(text)
+        local n = parseValueText(text)
+        MaxValueFilter = n
+        Config:Set("MaxValueFilter", n); Config:Save()
+        Notify("Filter", "Max Value = " .. (n == 0 and "∞" or FormatNumber(n)), 2)
+    end,
+})
+
+MainTab:Dropdown({
+    Title    = "Select Target Eggs",
+    Desc     = "Select the egg types for Auto Farm to collect (unselected = all types)",
+    Values   = ExtractedEggsList,
+    Multi    = true,
+    Value    = Config:Get("SelectedEggs", {}),
+    Callback = function(v)
+        table.clear(SelectedEggsLookup)
+        local saved = {}
+        if type(v) == "table" then
+            for k, val in pairs(v) do
+                if type(k) == "number" then
+                    SelectedEggsLookup[val] = true
+                    table.insert(saved, val)
+                elseif type(k) == "string" and (val == true or val == k) then
+                    SelectedEggsLookup[k] = true
+                    table.insert(saved, k)
+                end
+            end
+        end
+        Config:Set("SelectedEggs", saved); Config:Save()
+    end,
+})
+
+MainTab:Divider()
+MainTab:Section({ Title = "Plot Automation", Icon = "egg" })
+
+MainTab:Dropdown({
+    Title    = "Select Eggs for Place",
+    Desc     = "Select the egg to place in the nest (pick this one up to place it)",
+    Values   = ExtractedEggsList,
+    Multi    = true,
+    Value    = Config:Get("NestEggs", {}),
+    Callback = function(v)
+        table.clear(NestEggsLookup)
+        local saved = {}
+        if type(v) == "table" then
+            for k, val in pairs(v) do
+                if type(k) == "number" then
+                    NestEggsLookup[val] = true
+                    table.insert(saved, val)
+                elseif type(k) == "string" and (val == true or val == k) then
+                    NestEggsLookup[k] = true
+                    table.insert(saved, k)
+                end
+            end
+        end
+        Config:Set("NestEggs", saved); Config:Save()
+    end,
+})
+
+MainTab:Toggle({
+    Title    = "Auto Place Egg",
+    Desc     = "Automatically pick up the selected eggs and place them into the empty nests (5 nests)",
+    Value    = false,
+    Callback = function(v)
+        AutoNestEnabled = v
+        Notify("Auto Nest", v and "ON" or "OFF", 2)
+    end,
+})
+
+MainTab:Toggle({
+    Title    = "Auto Hatch Egg",
+    Desc     = "Automatically hatch eggs in the plot.",
+    Value    = false,
+    Callback = function(v)
+        AutoHatchEnabled = v
+        Notify("Auto Hatch", v and "ON" or "OFF", 2)
+    end,
+})
+
+MainTab:Toggle({
+    Title    = "Auto Upgrade Hatch",
+    Desc     = "Automatic Hatch Upgrade (Hatch Luck)",
+    Value    = false,
+    Callback = function(v)
+        AutoUpgradeEnabled = v
+        Notify("Auto Upgrade", v and "ON" or "OFF", 2)
+    end,
+})
+
+-- ═════════════════════════════════════════════════════════════════
+--  PLAYER TAB  (Movement / Noclip / Jump)
+-- ═════════════════════════════════════════════════════════════════
+PlayerTab:Divider()
+PlayerTab:Section({ Title = "Movement", Icon = "footprints" })
+
+PlayerTab:Slider({
+    Title    = "WalkSpeed",
+    Desc     = "Set the walking speed.",
+    Value    = { Min = 16, Max = 500, Default = WalkSpeedVal },
+    Step     = 1,
+    Callback = function(v)
+        WalkSpeedVal = v
+        Config:Set("WalkSpeedVal", v); Config:Save()
+        if WalkSpeedEnabled and Humanoid then Humanoid.WalkSpeed = v end
+    end,
+})
+
+PlayerTab:Toggle({
+    Title    = "Enable Custom WalkSpeed",
+    Desc     = "Enable the set WalkSpeed ​​value.",
+    Value    = false,
+    Callback = function(v)
+        WalkSpeedEnabled = v
+        if Humanoid then Humanoid.WalkSpeed = v and WalkSpeedVal or 16 end
+    end,
+})
+
+PlayerTab:Slider({
+    Title    = "JumpPower",
+    Desc     = "Set the jump height.",
+    Value    = { Min = 50, Max = 500, Default = JumpPowerVal },
+    Step     = 1,
+    Callback = function(v)
+        JumpPowerVal = v
+        Config:Set("JumpPowerVal", v); Config:Save()
+        if JumpPowerEnabled and Humanoid then
+            Humanoid.UseJumpPower = true
+            Humanoid.JumpPower = v
+        end
+    end,
+})
+
+PlayerTab:Toggle({
+    Title    = "Enable Custom JumpPower",
+    Desc     = "Enable the set JumpPower ​​value.",
+    Value    = false,
+    Callback = function(v)
+        JumpPowerEnabled = v
+        if Humanoid then
+            Humanoid.UseJumpPower = true
+            Humanoid.JumpPower = v and JumpPowerVal or 50
+        end
+    end,
+})
+
+PlayerTab:Divider()
+PlayerTab:Section({ Title = "Physics", Icon = "atom" })
+
+PlayerTab:Toggle({
+    Title    = "No Clip",
+    Desc     = "Walk through objects. (like ghost)",
+    Value    = false,
+    Callback = function(v)
+        NoClipEnabled = v
+        SetNoclip(v)
+        Notify("No Clip", v and "ON" or "OFF", 2)
+    end,
+})
+
+PlayerTab:Toggle({
+    Title    = "Infinite Jump",
+    Desc     = "Unlimited mid-air jumps",
+    Value    = false,
+    Callback = function(v)
+        InfJumpEnabled = v
+        Notify("Infinite Jump", v and "ON" or "OFF", 2)
+    end,
+})
+
+PlayerTab:Divider()
+PlayerTab:Section({ Title = "Quick Teleport", Icon = "map-pin" })
+
+PlayerTab:Button({ Title = "TP My Plot",    Callback = TeleportToMyPlot })
+PlayerTab:Button({ Title = "TP Egg Tracker", Callback = function() TeleportToStall("EggTracker") end })
+PlayerTab:Button({ Title = "TP Food Stall",  Callback = function() TeleportToStall("Food") end })
+PlayerTab:Button({ Title = "TP Gears Stall", Callback = function() TeleportToStall("Gears") end })
+PlayerTab:Button({ Title = "TP Sell Stall",  Callback = function() TeleportToStall("Sell") end })
+
+-- ═════════════════════════════════════════════════════════════════
+--  ESP TAB
+-- ═════════════════════════════════════════════════════════════════
+ESPTab:Divider()
+ESPTab:Section({ Title = "Egg ESP", Icon = "eye" })
+
+ESPTab:Paragraph({
+    Title = "Note",
+    Desc  = "Highlight = Glowing frame | Billboard = Floating text",
+    Image = "info", ImageSize = 24,
+})
+
+ESPTab:Toggle({
+    Title    = "ESP Highlight",
+    Desc     = "Highlight the border of every egg.",
+    Value    = false,
+    Callback = function(v)
+        EggESPEnabled = v
+        if not v then
+            for egg, hl in pairs(ActiveHighlights) do
+                if hl then pcall(function() hl:Destroy() end) end
+            end
+            table.clear(ActiveHighlights)
+        end
+    end,
+})
+
+ESPTab:Toggle({
+    Title    = "ESP Billboard",
+    Desc     = "Egg label and the floating distance above the egg.",
+    Value    = false,
+    Callback = function(v)
+        BillboardESPEnabled = v
+    end,
+})
+
+-- ═════════════════════════════════════════════════════════════════
+--  MISC TAB
+-- ═════════════════════════════════════════════════════════════════
+MiscTab:Divider()
+MiscTab:Section({ Title = "Server Utilities", Icon = "server" })
+
+MiscTab:Button({
+    Title = "Copy Job ID",
+    Desc  = "Copy this server's JobId.",
+    Callback = function()
+        if setclipboard then
+            setclipboard(game.JobId)
+            Notify("Copied", "Job ID copied to clipboard", 2)
+        end
+    end,
+})
+
+MiscTab:Button({
+    Title = "Rejoin Server",
+    Desc  = "Rejoin the same server",
+    Callback = function()
+        Notify("Rejoin", "Rejoining...", 2)
+        task.wait(1)
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+    end,
+})
+
+MiscTab:Button({
+    Title = "Serverhop",
+    Desc  = "Switch to a random server.",
+    Callback = function()
+        local servers = {}
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(game:HttpGet(
+                "https://games.roblox.com/v1/games/" .. game.PlaceId ..
+                "/servers/Public?sortOrder=Desc&limit=100"))
+        end)
+        if success and result and result.data then
+            for _, server in ipairs(result.data) do
+                if server.id ~= game.JobId and server.playing < server.maxPlayers then
+                    table.insert(servers, server.id)
+                end
+            end
+        end
+        if #servers > 0 then
+            Notify("Serverhop", "Teleporting...", 2)
+            task.wait(1)
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)], LocalPlayer)
+        else
+            Notify("Serverhop Failed", "No available servers.", 3)
+        end
+    end,
+})
+
+MiscTab:Divider()
+MiscTab:Section({ Title = "Player Options", Icon = "sliders-horizontal" })
+
+MiscTab:Toggle({
+    Title    = "Infinite Zoom",
+    Desc     = "Set the zoom camera out extremely far.",
+    Value    = InfZoomEnabled,
+    Callback = function(v)
+        InfZoomEnabled = v
+        Config:Set("InfZoom", v); Config:Save()
+        LocalPlayer.CameraMaxZoomDistance = v and 100000 or 128
+    end,
+})
+
+MiscTab:Toggle({
+    Title    = "Anti-AFK",
+    Desc     = "Block-Kicked from the game for being AFK.",
+    Value    = AntiAFKEnabled,
+    Callback = function(v)
+        AntiAFKEnabled = v
+        Config:Set("AntiAFK", v); Config:Save()
+        if v then
+            if not AntiAFKConnection then
+                AntiAFKConnection = LocalPlayer.Idled:Connect(function()
+                    VirtualUser:Button2Down(Vector2.new(0, 0), Camera.CFrame)
+                    task.wait(1)
+                    VirtualUser:Button2Up(Vector2.new(0, 0), Camera.CFrame)
+                end)
+            end
+        else
+            if AntiAFKConnection then
+                AntiAFKConnection:Disconnect()
+                AntiAFKConnection = nil
+            end
+        end
+    end,
+})
+
+MiscTab:Toggle({
+    Title    = "Show Top Teleport Bar",
+    Desc     = "Teleport button bar at the top of the screen.",
+    Value    = true,
+    Callback = function(v)
+        local bar = PlayerGui:FindFirstChild("StallTeleportBar")
+        if bar then bar.Enabled = v end
+    end,
+})
+
+MiscTab:Divider()
+MiscTab:Section({ Title = "Optimization", Icon = "zap" })
+
+MiscTab:Toggle({
+    Title    = "Fast Mode (FPS Booster)",
+    Desc     = "Lower map-wide graphics to boost FPS.",
+    Value    = false,
+    Callback = function(v)
+        FastModeEnabled = v
+        if v then
+            Lighting.GlobalShadows = false
+            Lighting.FogEnd = 9e9
+
+            local terrain = Workspace:FindFirstChildOfClass("Terrain")
+            if terrain then
+                terrain.WaterWaveSize = 0
+                terrain.WaterWaveSpeed = 0
+                terrain.WaterReflectance = 0
+                terrain.WaterTransparency = 0
+            end
+
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    obj.Material = Enum.Material.SmoothPlastic
+                elseif obj:IsA("ParticleEmitter") or obj:IsA("Smoke")
+                    or obj:IsA("Fire") or obj:IsA("Sparkles") or obj:IsA("PostEffect") then
+                    obj.Enabled = false
+                end
+            end
+            Notify("FPS Boost", "Graphics optimized", 2)
+        else
+            Lighting.GlobalShadows = OriginalLightingSettings.GlobalShadows
+            Lighting.FogEnd = OriginalLightingSettings.FogEnd
+            if OriginalLightingSettings.FogStart then
+                Lighting.FogStart = OriginalLightingSettings.FogStart
+            end
+            Notify("Graphics Restored", "Standard settings restored", 2)
+        end
+    end,
+})
+
+-- ═════════════════════════════════════════════════════════════════
+--  SETTINGS TAB
+-- ═════════════════════════════════════════════════════════════════
+SetTab:Divider()
+SetTab:Section({ Title = "Config Manager", Icon = "save" })
+
+SetTab:Button({
+    Title = "Save Config (NOW)",
+    Desc  = "Save all settings immediately.",
+    Callback = function()
+        Config:Save()
+        Notify("Config Saved", "Config saved successfully!", 2)
+    end,
+})
+
+SetTab:Button({
+    Title = "Reload Config File",
+    Desc  = "Reload configuration values ​​from the file.",
+    Callback = function()
+        Config:Load()
+        Notify("Config Reloaded", "Loaded user preferences", 2)
+    end,
+})
+
+local AutoSaveEnabled = Config:Get("AutoSaveEnabled", true)
+local AutoSaveDelay   = Config:Get("AutoSaveDelay", 15)
+
+SetTab:Toggle({
+    Title    = "Auto Save Config",
+    Desc     = "Automatically save the configuration at specified intervals.",
+    Value    = AutoSaveEnabled,
+    Callback = function(state)
+        AutoSaveEnabled = state
+        Config:Set("AutoSaveEnabled", state); Config:Save()
+        if state then Config:AutoSave(AutoSaveDelay) else Config:AutoSave(0) end
+    end,
+})
+
+SetTab:Input({
+    Title       = "Delay Save Config",
+    Desc        = "Auto-save interval (sec)",
+    Value       = tostring(AutoSaveDelay),
+    Placeholder = "Default: 15",
+    Callback    = function(text)
+        local num = tonumber(text)
+        if num and num >= 1 then
+            AutoSaveDelay = num
+            Config:Set("AutoSaveDelay", num); Config:Save()
+            if AutoSaveEnabled then Config:AutoSave(num) end
+            Notify("AutoSave", "Delay = " .. num .. "s", 2)
+        else
+            warn("[DYHUB] Invalid delay value!")
+        end
+    end,
+})
+
+-- ═════════════════════════════════════════════════════════════════
+--  BACKGROUND LOOPS
+-- ═════════════════════════════════════════════════════════════════
+
+-- ▸ Autofarm Engine (FreeHub) + Value Filters (Main.lua)
+task.spawn(function()
+    while task.wait(0.5) do
+        if AutofarmEnabled then
+            pcall(function()
+                local renderedFolder = Workspace:FindFirstChild("RenderedEggs")
+                local plotCenter = GetPlayerPlotCenter()
+
+                if renderedFolder and plotCenter then
+                    local targetEgg  = nil
+                    local bestValue  = -1
+
+                    for _, egg in ipairs(renderedFolder:GetChildren()) do
+                        local nameOk = (next(SelectedEggsLookup) == nil) or (SelectedEggsLookup[egg.Name] == true)
+                        if nameOk then
+                            local val = GetEggValue(egg)
+                            if val >= MinValueFilter and (MaxValueFilter == 0 or val <= MaxValueFilter) then
+                                if val > bestValue then
+                                    bestValue = val
+                                    targetEgg = egg
+                                end
+                            end
+                        end
+                    end
+
+                    if targetEgg and targetEgg.Parent then
+                        local reached = FlyToTarget(targetEgg)
+
+                        if reached and targetEgg.Parent and targetEgg:IsDescendantOf(Workspace) then
+                            InteractWithEgg(targetEgg)
+                            task.wait(1.30)
+                        end
+
+                        if AutofarmEnabled then
+                            FlyToTarget(plotCenter)
+                            task.wait(0.2)
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- ▸ Auto Put Egg to Nest (FreeHub)
+task.spawn(function()
+    while task.wait(0.5) do
+        if AutoNestEnabled then
+            pcall(function()
+                local plot = GetPlayerPlot()
+                local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+                local gameRemotes = remotes and remotes:FindFirstChild("Game")
+                local eggPlaced = gameRemotes and gameRemotes:FindFirstChild("EggPlaced")
+
+                if plot and eggPlaced and CheckAndEquipNestEgg() then
+                    local nestsFolder = plot:FindFirstChild("Nests")
+                    if nestsFolder then
+                        for nestId = 1, 5 do
+                            if not AutoNestEnabled then break end
+                            local nest = nestsFolder:FindFirstChild(tostring(nestId))
+                            if nest and IsNestFree(nest) then
+                                eggPlaced:FireServer({ NestId = tostring(nestId) })
+                                EggsPlacedCount = EggsPlacedCount + 1
+                                task.wait(0.1)
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- ▸ Auto Hatch Egg (FreeHub)
+task.spawn(function()
+    while task.wait(0.5) do
+        if AutoHatchEnabled then
+            pcall(function()
+                local plot = GetPlayerPlot()
+                local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+                local gameRemotes = remotes and remotes:FindFirstChild("Game")
+                local hatchRemote = gameRemotes and gameRemotes:FindFirstChild("Hatch")
+
+                if plot and hatchRemote then
+                    local eggsFolder = plot:FindFirstChild("Eggs")
+                    if eggsFolder then
+                        for _, egg in ipairs(eggsFolder:GetChildren()) do
+                            if not AutoHatchEnabled then break end
+                            local eggKey = egg:GetAttribute("EggKey")
+                            if eggKey then
+                                hatchRemote:FireServer({ EggKey = tostring(eggKey) })
+                                EggsHatchedCount = EggsHatchedCount + 1
+                                task.wait(0.1)
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- ▸ Auto Upgrade Hatch (Main.lua)
+task.spawn(function()
+    local upgradeRemote = getUpgradeRemote()
+    while task.wait(0.3) do
+        if AutoUpgradeEnabled then
+            local remote = upgradeRemote or getUpgradeRemote()
+            if remote then
+                pcall(function()
+                    remote:FireServer("HatchLuck")
+                    remote:FireServer("Hatch")
+                    remote:FireServer(1)
+                end)
+            end
+        end
+    end
+end)
+
+-- ▸ ESP Highlight Loop (FreeHub)
+task.spawn(function()
+    while task.wait(1) do
+        if EggESPEnabled then
+            pcall(function()
+                local renderedFolder = Workspace:FindFirstChild("RenderedEggs")
+                if renderedFolder then
+                    for _, egg in ipairs(renderedFolder:GetChildren()) do
+                        if not ActiveHighlights[egg] then
+                            local hl = Instance.new("Highlight")
+                            hl.Adornee = egg
+                            hl.FillColor = Color3.fromRGB(0, 200, 255)
+                            hl.OutlineColor = Color3.fromRGB(190, 40, 220)
+                            hl.Parent = egg
+                            ActiveHighlights[egg] = hl
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- ▸ ESP Billboard Container (Main.lua)
+local espFolder = Instance.new("Folder")
+espFolder.Name = "ESP_Container"
+espFolder.Parent = PlayerGui
+
+task.spawn(function()
+    while task.wait(0.25) do
+        espFolder:ClearAllChildren()
+        if not BillboardESPEnabled then continue end
+
+        pcall(function()
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if not hrp then return end
+
+            local hrpPos = hrp.Position
+            local renderedFolder = Workspace:FindFirstChild("RenderedEggs")
+            local eggPool = renderedFolder and renderedFolder:GetChildren() or {}
+
+            for _, eggModel in ipairs(eggPool) do
+                local part = eggModel:IsA("BasePart") and eggModel
+                    or eggModel:FindFirstChildWhichIsA("BasePart", true)
+                if part then
+                    local dist = (part.Position - hrpPos).Magnitude
+                    local val = GetEggValue(eggModel)
+
+                    local bgui = Instance.new("BillboardGui")
+                    bgui.Adornee = part
+                    bgui.Size = UDim2.new(0, 200, 0, 60)
+                    bgui.AlwaysOnTop = true
+                    bgui.MaxDistance = math.huge
+                    bgui.Parent = espFolder
+
+                    local txt = Instance.new("TextLabel")
+                    txt.Size = UDim2.new(1, 0, 1, 0)
+                    txt.BackgroundTransparency = 1
+                    txt.TextColor3 = Color3.fromRGB(0, 230, 255)
+                    txt.TextStrokeTransparency = 0
+                    txt.Font = Enum.Font.SourceSansBold
+                    txt.TextSize = 13
+                    txt.Text = string.format("Nama: %s\nNilai: %s\nJarak: %dm",
+                        eggModel.Name, FormatNumber(val), math.floor(dist))
+                    txt.Parent = bgui
+                end
+            end
+        end)
+    end
+end)
+
+-- ▸ Stats Refresher
+task.spawn(function()
+    while task.wait(1) do
+        pcall(function()
+            local elapsedMinutes = math.floor((os.time() - SessionStartTime) / 60)
+            StatsPara:SetDesc(string.format(
+                "Session: %dm | Grabbed: %d | Placed: %d | Hatched: %d | Eggs in map: %d",
+                elapsedMinutes,
+                EggsGrabbedCount,
+                EggsPlacedCount,
+                EggsHatchedCount,
+                Workspace:FindFirstChild("RenderedEggs") and #Workspace.RenderedEggs:GetChildren() or 0
+            ))
+        end)
+    end
+end)
+
+-- ▸ Infinite Jump Listener (Main.lua)
+UserInputService.JumpRequest:Connect(function()
+    if InfJumpEnabled then
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+
+-- ▸ Standalone Noclip (ถ้าเปิด Noclip แต่ไม่ได้เปิด Autofarm)
+RunService.Stepped:Connect(function()
+    if NoClipEnabled and not AutofarmEnabled then
+        local char = LocalPlayer.Character
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then part.CanCollide = false end
+            end
+        end
+    end
+end)
+
+-- ═════════════════════════════════════════════════════════════════
+--  INFORMATION TAB  (from UI KIT - ไม่แก้ไข)
+-- ═════════════════════════════════════════════════════════════════
+do
+local Info = InfoTab
+if not ui then ui = {} end
+if not ui.Creator then ui.Creator = {} end
+
+Info:Section({ Title = "Latest Update", TextXAlignment = "Center", TextSize = 17 })
+Info:Divider()
+Info:Paragraph({
+    Title = "Update: 18/09/2026 | CL: " .. ver,
+    Desc  = [[• [ Added ] Re-Build Auto Farm
+• [ Added ] Min/Max Value Filter
+• [ Added ] Auto Place Egg + Hatch
+• [ Added ] Auto Upgrade Hatch (Lag-less)
+• [ Added ] Player Tab (Quick Teleport)
+• [ Added ] ESP Highlight + Billboard
+• [ Fixed ] Auto Save Config ]],
+})
+Info:Divider()
+
+ui.Creator.Request = function(requestData)
+    local success, result = pcall(function()
+        if HttpService.RequestAsync then
+            local response = HttpService:RequestAsync({
+                Url = requestData.Url, Method = requestData.Method or "GET",
+                Headers = requestData.Headers or {}
+            })
+            return { Body = response.Body, StatusCode = response.StatusCode, Success = response.Success }
+        else
+            local body = HttpService:GetAsync(requestData.Url)
+            return { Body = body, StatusCode = 200, Success = true }
+        end
+    end)
+    if success then return result else error("HTTP Request failed: " .. tostring(result)) end
+end
+
+local InviteCode  = "jWNDPNMmyB"
+local DiscordAPI  = "https://discord.com/api/v10/invites/" .. InviteCode .. "?with_counts=true&with_expiration=true"
+
+local function LoadDiscordInfo()
+    local success, result = pcall(function()
+        return HttpService:JSONDecode(ui.Creator.Request({
+            Url = DiscordAPI, Method = "GET",
+            Headers = { ["User-Agent"] = "RobloxBot/1.0", ["Accept"] = "application/json" }
+        }).Body)
+    end)
+    if success and result and result.guild then
+        local DiscordInfo = Info:Paragraph({
+            Title = result.guild.name,
+            Desc = ' <font color="#52525b">●</font> Member Count : ' ..
+                tostring(result.approximate_member_count) ..
+                '\n <font color="#16a34a">●</font> Online Count : ' ..
+                tostring(result.approximate_presence_count),
+            Image = "https://cdn.discordapp.com/icons/" .. result.guild.id .. "/" ..
+                result.guild.icon .. ".png?size=1024", ImageSize = 42,
+        })
+        Info:Button({
+            Title = "Update Info",
+            Callback = function()
+                local ok, r = pcall(function()
+                    return HttpService:JSONDecode(ui.Creator.Request({ Url = DiscordAPI, Method = "GET" }).Body)
+                end)
+                if ok and r and r.guild then
+                    DiscordInfo:SetDesc(' <font color="#52525b">●</font> Member Count : ' ..
+                        tostring(r.approximate_member_count) ..
+                        '\n <font color="#16a34a">●</font> Online Count : ' ..
+                        tostring(r.approximate_presence_count))
+                    WindUI:Notify({ Title = "Discord Info Updated", Content = "Refreshed!", Duration = 2, Icon = "refresh-cw" })
+                else
+                    WindUI:Notify({ Title = "Update Failed", Content = "Could not refresh.", Duration = 3, Icon = "alert-triangle" })
+                end
+            end,
+        })
+        Info:Button({
+            Title = "Copy Discord Invite",
+            Callback = function()
+                setclipboard("https://discord.gg/" .. InviteCode)
+                WindUI:Notify({ Title = "Copied!", Content = "Discord invite copied!", Duration = 2, Icon = "clipboard-check" })
+            end,
+        })
+    else
+        Info:Paragraph({ Title = "Error fetching Discord Info", Desc = "Unable to load.", Image = "triangle-alert", ImageSize = 26, Color = "Red" })
+    end
+end
+LoadDiscordInfo()
+
+Info:Divider()
+Info:Section({ Title = "DYHUB Information", TextXAlignment = "Center", TextSize = 17 })
+Info:Divider()
+Info:Paragraph({ Title = "Main Owner", Desc = "@dyumraisgoodguy#8888", Image = "rbxassetid://119789418015420", ImageSize = 30 })
+Info:Paragraph({
+    Title = "Social", Desc = "Copy link social media for follow!",
+    Image = "rbxassetid://104487529937663", ImageSize = 30,
+    Buttons = {{ Icon = "copy", Title = "Copy Link", Callback = function() setclipboard("https://guns.lol/DYHUB") end }},
+})
+Info:Paragraph({
+    Title = "Discord", Desc = "Join our discord for more scripts!",
+    Image = "rbxassetid://104487529937663", ImageSize = 30,
+    Buttons = {{ Icon = "copy", Title = "Copy Link", Callback = function() setclipboard("https://discord.gg/jWNDPNMmyB") end }},
+})
+end -- INFORMATION TAB do-scope
+
+print("[DYHUB] Ride A Pet " .. version .. " | " .. ver .. " loaded successfully!")
+print("[DYHUB] Config active | Auto saving every " .. tostring(AutoSaveDelay) .. "s")
