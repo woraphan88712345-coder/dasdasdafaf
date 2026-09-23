@@ -647,6 +647,7 @@ local HubState = {
     PrioritizeRGB = true,
     BatchMultiGrab = true,
     AutoSell = false,
+    AutoSellMinAmount = 0,
     AutoCollectGems = false,
     AutoWinNeedle = false,
     AutoDeployDrone = false,
@@ -1867,6 +1868,15 @@ local basementLeverThread = task.spawn(function()
 end)
 table.insert(HubThreads, basementLeverThread)
 
+-- วางไว้เหนือ farmThread เดิม
+local function shouldTriggerAutoSell(currentHay, maxCap)
+    if maxCap <= 0 then return false end
+    if currentHay >= maxCap then return true end
+    local minAmount = tonumber(HubState.AutoSellMinAmount) or 0
+    if minAmount > 0 and currentHay >= minAmount then return true end
+    return false
+end
+
 local farmThread = task.spawn(function()
     while IsHubLoaded do
         local equippedSlot = getCurrentEquippedSlot()
@@ -1893,9 +1903,10 @@ local farmThread = task.spawn(function()
                 local maxCap = getHayCapacity()
 
                 -- FULL BAG CHECK -> COMPLETE AUTONOMOUS SELL CYCLE
-                if currentHay >= maxCap and maxCap > 0 and not HubState.AutoSell then
+                local sellReady = shouldTriggerAutoSell(currentHay, maxCap)
+                if sellReady and not HubState.AutoSell then
                     stopVacuumAutomation()
-                elseif currentHay >= maxCap and maxCap > 0 and HubState.AutoSell then
+                elseif sellReady and HubState.AutoSell then
                     stopVacuumAutomation()
                     if HubState.NoTeleportMode then
                         local now = os.clock()
@@ -2970,7 +2981,7 @@ local function BuildWindUI()
 
     for _, key in ipairs({
         "TntInterval", "ForcedToolSlot", "FarmCooldown",
-        "CameraZoomDistance", "WalkSpeed", "JumpHeight", "FlySpeed"
+        "CameraZoomDistance", "WalkSpeed", "JumpHeight", "FlySpeed", "AutoSellMinAmount" -- เพิ่มบรรทัดนี้
     }) do
         local value = cfg(key, nil)
         if value ~= nil then
@@ -3171,6 +3182,22 @@ local function BuildWindUI()
 
     bindToggle(MainTab, "Auto Sell", "AutoSell",
         "Automatically sells when the bag is full.")
+
+    MainTab:Input({
+        Title = "Auto Sell Min Amount",
+        Desc = "Automatically sell straw when this amount is reached (0 = wait until backpack is full)",
+        Value = tostring(HubState.AutoSellMinAmount or 0),
+        Placeholder = "0",
+        Callback = function(text)
+            local value = tonumber(text)
+            if value and value >= 0 then
+                HubState.AutoSellMinAmount = math.floor(value)
+                saveState("AutoSellMinAmount", HubState.AutoSellMinAmount)
+            else
+                notify("Config", "The entered value is incorrect.", "alert-triangle")
+            end
+        end
+    })
 
     bindToggle(MainTab, "Auto Collect Gems", "AutoCollectGems",
         "Automatically collects nearby gems.")
